@@ -1,145 +1,163 @@
-# AI Agent — Sovereign, MCP-native autonomous assistant
+# AI Agent — Sovereign, MCP-native Drive assistant
 
-First stable implementation of the architecture described in the note of
-15 April 2026: a document-processing AI agent built around four pillars.
+First stable implementation of the architecture described in the design note
+of 15 April 2026: an autonomous document-processing agent built on four
+independent pillars.
 
-| Pillar | What it does | Where it lives in this repo |
+| Pillar | What it does | Where it lives |
 | --- | --- | --- |
-| **Orchestrator** (OpenClaw-style) | Runs the agent loop, keeps short-term memory, coordinates tools | `src/orchestrator/` |
-| **LLM gateway** (OpenRouter) | Routes each request to the best/cheapest model | `src/orchestrator/openrouter.py` |
-| **MCP gateway** (Gandi-hosted) | Exposes Google Drive as audited, sandboxed tools | `src/mcp_drive_server/` |
-| **Document store** (Google Drive) | Source of truth for inputs and deliverables | — (external) |
+| **Orchestrator** — [OpenClaw](https://openclaw.ai) | Local-first Gateway, ReAct loop, short-term memory, MCP client, multi-channel inbox | External (installed via its own CLI) |
+| **LLM gateway** — [OpenRouter](https://openrouter.ai) | Routes each request to the best/cheapest model | Configured inside OpenClaw |
+| **MCP gateway** — *this repo* | Exposes a Google Drive sandbox as audited MCP tools | `src/mcp_drive_server/` |
+| **Document store** — Google Drive | Source of truth for inputs and deliverables | External |
 
-The orchestrator talks to the MCP server via the **Model Context Protocol**
-(stdio locally, streamable HTTP in production). The MCP server is the *only*
-component that holds Google credentials.
+The **only component this repository ships** is the MCP Drive gateway (the
+"Serveur MCP sur Gandi" of the design note). Everything else — the agent
+loop, model routing, personality, multi-agent coordination — is OpenClaw,
+configured via `config/SOUL.md`, `config/AGENTS.md`, and
+`config/openclaw.config.json5`.
 
-## Why this architecture
+A tiny fallback orchestrator (`src/orchestrator/`) is also bundled for CI,
+air-gapped demos, or bootstrapping before OpenClaw is installed. It speaks
+the same MCP server, just with a much thinner agent loop.
 
-- **Zero vendor lock-in**: switch models by changing `OPENROUTER_DEFAULT_MODEL`.
-- **Zero-trust data access**: the LLM never sees OAuth tokens; every Drive
-  operation goes through the MCP gateway, is sandboxed to a single folder, and
-  is audited to a JSONL log.
-- **FinOps controls**: `OPENROUTER_MAX_COST_USD` aborts runaway runs.
-- **Extensibility**: add a new MCP server (Slack, Notion, a CRM…) and the
-  orchestrator picks up its tools automatically at startup.
+## Why this split
 
-## Quickstart
+- **Zero vendor lock-in on the model.** OpenRouter picks the model; flip a
+  config value to change it.
+- **Zero-trust on the data.** The LLM (and OpenClaw itself) never see
+  Google credentials. The MCP server holds the service-account key and
+  enforces the sandbox on every call.
+- **FinOps controls.** OpenRouter reports per-call cost; the fallback
+  runner has `OPENROUTER_MAX_COST_USD` as a hard cap.
+- **Extensibility by composition.** Add Slack, Notion, or a CRM by
+  registering another MCP server with `openclaw mcp set` — no code change
+  in the agent.
 
-### 1. Install
+## Quickstart — OpenClaw deployment (reference)
+
+Follow this path if you want the architecture from the design note end to
+end.
+
+```bash
+# 1. Install OpenClaw (see https://openclaw.ai for the current installer).
+# 2. Onboard with OpenRouter:
+openclaw onboard --auth-choice openrouter-api-key
+
+# 3. Clone this repo and install the Drive gateway's Python deps.
+git clone <this repo> && cd Ai-Agent
+python -m venv .venv && source .venv/bin/activate
+pip install -e .
+
+# 4. Provision Google Drive:
+#    * Create a service account in Google Cloud, download its JSON key,
+#      save it as ./secrets/service_account.json
+#    * Share the target Drive folder with the service-account email.
+#    * Export its folder id:
+export DRIVE_ROOT_FOLDER_ID=1AbC...xyz
+
+# 5. Register the MCP server with OpenClaw:
+./scripts/register-openclaw.sh            # local (stdio)
+./scripts/register-openclaw.sh --remote   # Gandi-hosted (streamable-http)
+
+# 6. Point OpenClaw at the SOUL.md / AGENTS.md in this repo (or merge the
+#    snippet from config/openclaw.config.json5 into your OpenClaw config).
+
+# 7. Start chatting via whichever channel you set up in OpenClaw (WhatsApp,
+#    Telegram, Slack, local terminal…). Try:
+#        "Résume le compte-rendu Q3 du dossier Stratégie."
+```
+
+## Quickstart — fallback runner (no OpenClaw)
+
+Useful for CI, demos, or if OpenClaw isn't installed yet.
 
 ```bash
 python -m venv .venv && source .venv/bin/activate
 pip install -e '.[dev]'
-```
+cp .env.example .env    # fill OPENROUTER_API_KEY and DRIVE_ROOT_FOLDER_ID
+# Place the service account JSON at ./secrets/service_account.json
 
-### 2. Provision Google Drive
-
-1. In Google Cloud, create a **service account** and download its JSON key.
-   Save it at `./secrets/service_account.json`.
-2. In Drive, **share the target folder** (the "sandbox") with the service
-   account's email address. Read/write as needed.
-3. Copy the folder ID from its URL into `DRIVE_ROOT_FOLDER_ID`.
-
-### 3. Configure
-
-```bash
-cp .env.example .env
-# Fill in OPENROUTER_API_KEY and DRIVE_ROOT_FOLDER_ID at minimum.
-```
-
-### 4. Use
-
-```bash
-# See what MCP tools are available:
-ai-agent tools
-
-# One-shot question:
-ai-agent ask "Summarise the Q3 meeting notes in the Strategy folder."
-
-# Interactive chat with persistent session memory:
-ai-agent chat
+ai-agent tools                             # list MCP tools
+ai-agent ask "Summarise the Q3 notes."     # one-shot
+ai-agent chat                              # interactive REPL
 ```
 
 ## Repository layout
 
 ```
 src/
-  orchestrator/         # OpenClaw-style agent
-    agent.py            # tool-using loop
-    openrouter.py       # OpenRouter client (OpenAI-compatible API)
-    mcp_client.py       # wraps an MCP session, exposes OpenAI-format tools
-    memory.py           # short-term conversation memory
-    cli.py              # typer CLI: ask / chat / tools
-    prompts/system.md   # default system prompt
-  mcp_drive_server/     # Drive-backed MCP server
-    server.py           # FastMCP app + audit hook
-    drive.py            # sandboxed Drive wrapper (policy lives here)
-    audit.py            # append-only JSONL audit log
-    config.py           # pydantic settings
-tests/                  # 20 tests, all hermetic (no network / no credentials)
-docker-compose.yml
+  mcp_drive_server/           # MCP Drive gateway  —  this is THE deliverable
+    server.py                 # FastMCP app + audit hook
+    drive.py                  # sandboxed Drive wrapper (policy lives here)
+    audit.py                  # append-only JSONL audit
+    config.py                 # pydantic settings
+  orchestrator/               # fallback runner, only used without OpenClaw
+    agent.py, openrouter.py, mcp_client.py, memory.py, cli.py
+config/
+  SOUL.md                     # OpenClaw personality (document analyst)
+  AGENTS.md                   # OpenClaw operating rules
+  openclaw.config.json5       # OpenClaw config snippet
+scripts/
+  register-openclaw.sh        # idempotent `openclaw mcp set` wrapper
+tests/                        # 20 hermetic tests (no net, no creds)
+docs/ARCHITECTURE.md
 Dockerfile
-docs/ARCHITECTURE.md    # deeper design notes, threat model, deployment
+docker-compose.yml
 ```
 
-## Runtime flow (matches the spec's §4)
+## Runtime flow (matches §4 of the design note)
 
-1. User runs `ai-agent ask "…"` (or sends a message that the orchestrator
-   picks up from a queue/webhook).
-2. Orchestrator discovers MCP tools via `MCPGateway.connect_*()` and renders
-   them as OpenAI tool definitions.
-3. It sends the conversation to OpenRouter with the tool list.
-4. If the model requests a tool, the orchestrator forwards the call to the
-   MCP server, which validates policy (sandbox, MIME, size cap), hits the
-   Drive API, records the call in `audit/mcp-drive.jsonl`, and returns the
-   result.
-5. The tool result is appended to memory and the loop continues until the
-   model produces a final answer (or `AGENT_MAX_STEPS` / cost budget hits).
+1. A user messages OpenClaw (via WhatsApp/Telegram/Slack/terminal).
+2. OpenClaw reads `SOUL.md` + `AGENTS.md`, picks a model via OpenRouter,
+   and discovers the `drive-gateway` MCP server's tools.
+3. On a tool call, OpenClaw forwards it to our MCP server.
+4. The MCP server validates policy (sandbox, MIME allow-list, byte cap),
+   calls Google Drive, logs the call to `audit/mcp-drive.jsonl`, and
+   returns the result.
+5. OpenClaw loops until the model produces a final answer, then replies
+   on the originating channel.
 
 ## Security model (summary)
 
-- **Credentials isolation.** The orchestrator has *no* Google credentials. It
-  can only invoke whitelisted MCP tools. The MCP server holds the service
-  account key and is the only process that touches Drive.
-- **Folder sandbox.** `DriveClient._assert_in_sandbox` walks a file's parent
-  chain and refuses any file whose ancestor chain does not include
+- **Credential isolation.** OpenClaw holds OpenRouter keys. The MCP server
+  holds Google credentials. The LLM sees neither.
+- **Folder sandbox.** `DriveClient._assert_in_sandbox` walks each file's
+  parent chain and refuses anything whose ancestors don't include
   `DRIVE_ROOT_FOLDER_ID`.
-- **MIME allow-list.** `DRIVE_ALLOWED_MIME_TYPES` caps which types can be
-  *read*. Defaults to Google Docs, Sheets, plain text, markdown, CSV, PDF.
-- **Byte cap.** Reads larger than `DRIVE_MAX_READ_BYTES` abort mid-download.
-- **Cost cap.** `OPENROUTER_MAX_COST_USD` stops an agent run when the
-  cumulative reported cost exceeds the budget.
-- **Audit trail.** Every MCP tool call is written to `audit/mcp-drive.jsonl`
-  with timestamp, arguments, status, duration, and error (if any).
+- **MIME allow-list.** `DRIVE_ALLOWED_MIME_TYPES` caps readable types.
+- **Byte cap.** Reads over `DRIVE_MAX_READ_BYTES` abort mid-download.
+- **Audit trail.** Every MCP tool call is appended to
+  `audit/mcp-drive.jsonl` with ts, args, status, duration, and error.
 
-See `docs/ARCHITECTURE.md` for a full threat model.
+See `docs/ARCHITECTURE.md` for the full threat model.
 
-## Running the tests
+## Tests
 
 ```bash
 pytest -q
 ```
 
-All tests are offline (mocked HTTP transport, in-memory MCP transport, fake
-Drive) — no API keys or network required.
+All 20 tests are offline (mocked HTTP, in-memory MCP transport, fake Drive)
+— no API keys or network required.
 
 ## Docker
 
 ```bash
 docker compose build
-docker compose run --rm orchestrator chat
+docker compose up -d mcp-drive        # daemonise the MCP gateway (prod path)
+docker compose run --rm orchestrator chat   # fallback runner, for dev/demo
 ```
 
-The `mcp-drive` service is structured as a daemon for when you switch to the
-HTTP transport (recommended for the Gandi-hosted deployment). For local
-development, the orchestrator spawns the MCP server over stdio and this
-service can remain stopped.
+On a Gandi VPS, run only the `mcp-drive` service, expose the streamable
+HTTP transport, and point your OpenClaw config at its public URL (see the
+`--remote` branch in `scripts/register-openclaw.sh`).
 
-## Roadmap (post-PoC)
+## A note on how this repo came to be
 
-- Streamable HTTP transport for the MCP server (auth with bearer token
-  already wired in `MCPGateway.connect_http`).
-- Persistent memory backend (SQLite → Postgres).
-- Message-bus triggers (Slack, email, cron) feeding `agent.run()`.
-- Per-tool rate limits and per-user ACLs on the MCP server.
+The first commit mistakenly re-implemented an "OpenClaw-style" orchestrator
+from scratch — the author's knowledge cutoff pre-dated OpenClaw's January
+2026 launch. The second commit realigns the codebase: OpenClaw is now used
+as intended (external orchestrator), and the in-repo Python orchestrator
+has been demoted to a fallback runner. The MCP Drive gateway was already
+correct in the first pass and is unchanged.

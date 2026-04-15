@@ -21,7 +21,14 @@ from .config import OrchestratorSettings
 from .mcp_client import MCPGateway
 from .openrouter import OpenRouterClient
 
-app = typer.Typer(add_completion=False, help="OpenClaw-style AI agent CLI.")
+app = typer.Typer(
+    add_completion=False,
+    help=(
+        "Minimal standalone agent runner (fallback when OpenClaw is not "
+        "installed). For the reference deployment, use the `openclaw` CLI "
+        "with the Drive gateway registered via scripts/register-openclaw.sh."
+    ),
+)
 console = Console()
 
 
