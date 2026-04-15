@@ -3,10 +3,13 @@
 ## Components
 
 ```
-                +-----------------------+
-  user input -->|    Orchestrator       |
-                | (OpenClaw-style loop) |
-                +-----------+-----------+
+  user channels (WhatsApp / Telegram / Slack / CLI …)
+                            |
+                            v
+                +-------------------------+
+                |  OpenClaw Gateway       |  <-- SOUL.md + AGENTS.md
+                |  (ReAct loop, memory)   |      drive OpenClaw config
+                +-----------+-------------+
                             | (A) OpenAI-compatible tool-calling
                             v
                 +-----------------------+
@@ -17,8 +20,8 @@
                             |
                             v
                 +-----------------------+
-                |    MCP Gateway        |          audit log (JSONL)
-                |  (Drive-backed tools) +-------> ./audit/mcp-drive.jsonl
+                |    MCP Drive Gateway  |          audit log (JSONL)
+                |    (this repo)        +-------> ./audit/mcp-drive.jsonl
                 +-----------+-----------+
                             | Drive API v3
                             v
@@ -27,6 +30,14 @@
                 |   (sandboxed folder)  |
                 +-----------------------+
 ```
+
+Only the **MCP Drive Gateway** box is code owned by this repository. The
+Gateway is the real OpenClaw binary, configured via the artifacts in
+`config/`.
+
+A fallback runner (`src/orchestrator/`) also exists in this repo and takes
+OpenClaw's place when it is not installed — useful for CI and hermetic
+demos. The trust model below applies equally to both deployments.
 
 ## Trust boundaries
 
@@ -61,29 +72,30 @@
 
 ### Local / dev (stdio transport)
 
-The orchestrator spawns the MCP server as a child process. Simplest setup,
-zero network attack surface.
+OpenClaw (or the fallback runner) spawns the MCP server as a child process.
+Simplest setup, zero network attack surface.
 
-```
-MCP_TRANSPORT=stdio
+Register with:
+
+```bash
+./scripts/register-openclaw.sh
 ```
 
-### Gandi-hosted MCP, orchestrator elsewhere (HTTP transport)
+### Gandi-hosted MCP, OpenClaw elsewhere (streamable HTTP transport)
 
 Matches the spec's deployment diagram. The MCP server runs on a Gandi VPS;
-the orchestrator can run anywhere (laptop, Gandi Simple Hosting, a cron VM).
+OpenClaw runs wherever the user's channels live (laptop, another VPS).
 
-```
-MCP_TRANSPORT=http
-MCP_SERVER_URL=https://mcp.example.gandi.net/mcp
-MCP_SERVER_TOKEN=<bearer>
+```bash
+export MCP_SERVER_URL=https://mcp.example.gandi.net/mcp
+export MCP_SERVER_TOKEN=<bearer>
+./scripts/register-openclaw.sh --remote
 ```
 
-The server-side streamable HTTP transport is not wired by default in this
-first version — `python -m mcp_drive_server` runs stdio. To expose it over
-HTTP, swap the `app.run()` call for the FastMCP HTTP entry point in
-`src/mcp_drive_server/__main__.py`. Gandi's Simple Hosting or a Docker
-container on a VPS both work.
+OpenClaw registers the server as `{"transport": "streamable-http", "url": ..., "headers": {...}}`
+(see `openclaw mcp set`). On the Gandi side, run `python -m mcp_drive_server`
+behind a reverse-proxy terminating TLS; switch the entry point to FastMCP's
+HTTP transport when exposing publicly.
 
 ## Extensibility
 

@@ -1,0 +1,49 @@
+// OpenClaw configuration snippet for this agent.
+//
+// Apply it either by merging into ~/.openclaw/config.json5, or by running the
+// targeted CLI commands listed in scripts/register-openclaw.sh — the latter
+// is idempotent and safer if you already have an OpenClaw config.
+{
+  env: {
+    // Exported once during `openclaw onboard --auth-choice openrouter-api-key`;
+    // we list it here for documentation only — do NOT commit a real key.
+    OPENROUTER_API_KEY: "sk-or-...",
+  },
+
+  agents: {
+    defaults: {
+      // Route through OpenRouter; `auto` lets OpenRouter pick the best model
+      // per request. Swap to a pinned model (e.g. "openrouter/anthropic/claude-3.5-sonnet")
+      // for reproducibility.
+      model: { primary: "openrouter/auto" },
+
+      // Prompt files loaded into the agent's context at session start.
+      // Paths are resolved relative to the workspace root.
+      prompts: {
+        soul: "./config/SOUL.md",
+        agents: "./config/AGENTS.md",
+      },
+    },
+  },
+
+  mcp: {
+    servers: {
+      // The Drive gateway defined in this repo. Stdio transport for local
+      // development; switch to streamable-http when the server runs on Gandi
+      // (see scripts/register-openclaw.sh for the production variant).
+      "drive-gateway": {
+        command: "python",
+        args: ["-m", "mcp_drive_server"],
+        cwd: "${WORKSPACE}",
+        env: {
+          GOOGLE_SERVICE_ACCOUNT_FILE: "./secrets/service_account.json",
+          DRIVE_ROOT_FOLDER_ID: "${DRIVE_ROOT_FOLDER_ID}",
+          DRIVE_ALLOWED_MIME_TYPES:
+            "application/pdf,application/vnd.google-apps.document,application/vnd.google-apps.spreadsheet,text/plain,text/markdown,text/csv",
+          DRIVE_MAX_READ_BYTES: "2000000",
+          MCP_AUDIT_LOG: "./audit/mcp-drive.jsonl",
+        },
+      },
+    },
+  },
+}
