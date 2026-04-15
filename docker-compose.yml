@@ -1,0 +1,36 @@
+# docker-compose for local development and Gandi Simple Hosting deployment.
+#
+# The MCP server runs as its own long-lived container. The orchestrator can be
+# started ad-hoc (`docker compose run --rm orchestrator ask "..."`) or run as a
+# daemon depending on your trigger (cron, webhook listener, etc.).
+
+services:
+  mcp-drive:
+    build: .
+    image: ai-agent:latest
+    container_name: ai-agent-mcp-drive
+    restart: unless-stopped
+    env_file: .env
+    volumes:
+      - ./secrets:/app/secrets:ro
+      - ./audit:/app/audit
+    # For the stdio transport this service is effectively a daemon that waits
+    # for an orchestrator subprocess; for production the server should be
+    # fronted with the `mcp` SDK's streamable HTTP transport — expose ports
+    # and switch the CMD accordingly.
+    command: ["python", "-m", "mcp_drive_server"]
+
+  orchestrator:
+    build: .
+    image: ai-agent:latest
+    env_file: .env
+    volumes:
+      - ./secrets:/app/secrets:ro
+      - ./audit:/app/audit
+    depends_on:
+      - mcp-drive
+    # Interactive by default — run with `docker compose run --rm orchestrator chat`.
+    stdin_open: true
+    tty: true
+    entrypoint: ["python", "-m", "orchestrator"]
+    command: ["chat"]
