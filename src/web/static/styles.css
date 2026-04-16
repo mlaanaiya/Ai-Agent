@@ -1,0 +1,198 @@
+/* --- scrollbars ----------------------------------------------------------- */
+* { scrollbar-width: thin; scrollbar-color: #3a3b42 transparent; }
+*::-webkit-scrollbar { width: 8px; height: 8px; }
+*::-webkit-scrollbar-track { background: transparent; }
+*::-webkit-scrollbar-thumb { background: #3a3b42; border-radius: 4px; }
+*::-webkit-scrollbar-thumb:hover { background: #4a4b52; }
+
+/* --- subtle background grain ---------------------------------------------- */
+body {
+  background-image:
+    radial-gradient(60% 40% at 20% 0%, rgba(126, 34, 206, 0.10), transparent 70%),
+    radial-gradient(50% 40% at 100% 100%, rgba(34, 211, 238, 0.08), transparent 70%);
+}
+
+/* --- message bubbles ------------------------------------------------------ */
+.msg { animation: pop 220ms cubic-bezier(.2,.9,.2,1.2); }
+@keyframes pop {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0);   }
+}
+
+.msg-user {
+  max-width: 42rem;
+  margin-left: auto;
+  background: linear-gradient(135deg, #7e22ce 0%, #a855f7 100%);
+  color: #fff;
+  padding: 0.75rem 1rem;
+  border-radius: 1rem 1rem 0.25rem 1rem;
+  box-shadow: 0 10px 30px -12px rgba(168, 85, 247, 0.4);
+  white-space: pre-wrap;
+}
+
+.msg-assistant {
+  max-width: 48rem;
+  margin-right: auto;
+  background: #141519;
+  border: 1px solid #26272e;
+  color: #f4f4f5;
+  padding: 0.85rem 1.1rem;
+  border-radius: 1rem 1rem 1rem 0.25rem;
+  white-space: pre-wrap;
+  line-height: 1.55;
+}
+
+.msg-assistant h1, .msg-assistant h2, .msg-assistant h3 {
+  font-weight: 600;
+  margin: 0.6em 0 0.3em;
+}
+.msg-assistant code {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  background: #0f1014;
+  border: 1px solid #26272e;
+  padding: 0 4px;
+  border-radius: 4px;
+  font-size: 0.85em;
+}
+.msg-assistant pre code { display: block; padding: 10px; overflow-x: auto; }
+
+/* --- tool call card ------------------------------------------------------- */
+.tool-card {
+  max-width: 48rem;
+  margin-right: auto;
+  border: 1px solid #26272e;
+  border-radius: 12px;
+  background: rgba(15, 16, 20, 0.6);
+  overflow: hidden;
+  font-size: 0.8rem;
+  animation: pop 220ms cubic-bezier(.2,.9,.2,1.2);
+}
+.tool-card-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.55rem 0.85rem;
+  background: rgba(192, 132, 252, 0.06);
+  border-bottom: 1px solid #26272e;
+  cursor: pointer;
+  user-select: none;
+}
+.tool-card-header .tool-name {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  color: #c084fc;
+  font-weight: 500;
+}
+.tool-card-header .tool-status {
+  margin-left: auto;
+  font-size: 0.7rem;
+  padding: 0.1rem 0.5rem;
+  border-radius: 999px;
+  background: #26272e;
+  color: #a1a3ac;
+}
+.tool-card-header .tool-status.ok       { background: #14321f; color: #4ade80; }
+.tool-card-header .tool-status.denied   { background: #3d1a1a; color: #fca5a5; }
+.tool-card-header .tool-status.running  { background: #1f2937; color: #93c5fd; }
+.tool-card-body {
+  padding: 0.6rem 0.85rem;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 0.75rem;
+  color: #d4d4d8;
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 0.3rem 0.7rem;
+}
+.tool-card-body .label { color: #6b6d76; }
+.tool-card-body pre {
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 260px;
+  overflow: auto;
+  margin: 0;
+}
+.tool-card-body[hidden] { display: none; }
+
+/* --- session item --------------------------------------------------------- */
+.session-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.45rem 0.6rem;
+  border-radius: 0.5rem;
+  color: #d4d4d8;
+  cursor: pointer;
+  transition: background 150ms;
+}
+.session-item:hover { background: #1c1d22; }
+.session-item.active {
+  background: linear-gradient(135deg, rgba(126, 34, 206, 0.25), rgba(34, 211, 238, 0.15));
+  color: #f4f4f5;
+  border: 1px solid rgba(192, 132, 252, 0.25);
+}
+.session-item .title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.session-item .delete {
+  opacity: 0;
+  color: #6b6d76;
+}
+.session-item:hover .delete { opacity: 1; }
+.session-item .delete:hover { color: #f87171; }
+
+/* --- status dot ----------------------------------------------------------- */
+.status-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: #ef4444;
+  box-shadow: 0 0 0 2px #0f1014;
+}
+.status-dot.ok  { background: #22c55e; }
+
+/* --- typing indicator ----------------------------------------------------- */
+.typing { display: inline-flex; gap: 4px; }
+.typing > span {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: #a1a3ac;
+  animation: blink 1.2s infinite ease-in-out both;
+}
+.typing > span:nth-child(2) { animation-delay: .2s; }
+.typing > span:nth-child(3) { animation-delay: .4s; }
+@keyframes blink { 0%, 80%, 100% { opacity: .3 } 40% { opacity: 1 } }
+
+/* --- tool list in right panel -------------------------------------------- */
+.tool-item {
+  border: 1px solid #26272e;
+  background: #141519;
+  border-radius: 8px;
+  padding: 0.55rem 0.7rem;
+}
+.tool-item .name {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  color: #c084fc;
+  font-size: 0.78rem;
+  font-weight: 500;
+}
+.tool-item .desc {
+  color: #a1a3ac;
+  font-size: 0.72rem;
+  margin-top: 2px;
+  line-height: 1.4;
+}
+
+/* --- audit entry ---------------------------------------------------------- */
+.audit-item {
+  border-left: 2px solid #3a3b42;
+  padding: 0.2rem 0.5rem;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+}
+.audit-item.ok      { border-left-color: #22c55e; }
+.audit-item.denied  { border-left-color: #f87171; }
+.audit-item.error   { border-left-color: #f97316; }
+.audit-item .tool   { color: #c084fc; }
+.audit-item .ts     { color: #6b6d76; font-size: 0.7rem; }

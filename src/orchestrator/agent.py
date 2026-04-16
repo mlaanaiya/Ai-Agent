@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import logging
+from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -63,11 +64,44 @@ class Agent:
         return self._memory
 
     async def run(self, user_prompt: str) -> AgentResult:
-        self._memory.add_user(user_prompt)
-        tools = self._mcp.openai_tools()
+        """Run the agent loop and return only the final AgentResult.
+
+        Implemented on top of `stream_events` so both paths share the exact
+        same behavior.
+        """
         result = AgentResult(final_text="")
+        async for event in self.stream_events(user_prompt):
+            if event["type"] == "step":
+                result.steps.append(event["trace"])
+                result.total_cost_usd += event["trace"].cost_usd
+            elif event["type"] == "final":
+                result.final_text = event["text"]
+                result.stopped_reason = event["stopped_reason"]
+        return result
+
+    async def stream_events(self, user_prompt: str) -> AsyncIterator[dict[str, Any]]:
+        """Run the agent loop, yielding structured events as they happen.
+
+        Event schema (all events carry `type`):
+            {"type": "user",           "text": str}
+            {"type": "llm_start",      "step": int}
+            {"type": "assistant",      "step": int, "text": str | None,
+                                        "tool_calls": [ {id,name,arguments}, ... ]}
+            {"type": "tool_call",      "step": int, "id": str, "name": str,
+                                        "arguments": dict}
+            {"type": "tool_result",    "step": int, "id": str, "name": str,
+                                        "content": str, "error": bool}
+            {"type": "step",           "trace": AgentStepTrace}
+            {"type": "final",          "text": str, "stopped_reason": str,
+                                        "total_cost_usd": float}
+        """
+        self._memory.add_user(user_prompt)
+        yield {"type": "user", "text": user_prompt}
+        tools = self._mcp.openai_tools()
+        total_cost = 0.0
 
         for step in range(1, self._max_steps + 1):
+            yield {"type": "llm_start", "step": step}
             try:
                 response = await self._llm.chat(
                     messages=self._memory.snapshot(),
@@ -75,8 +109,16 @@ class Agent:
                     tools=tools or None,
                 )
             except BudgetExceededError as exc:
-                result.stopped_reason = f"budget_exceeded: {exc}"
-                break
+                yield {
+                    "type": "final",
+                    "text": f"Budget exceeded: {exc}",
+                    "stopped_reason": f"budget_exceeded: {exc}",
+                    "total_cost_usd": total_cost,
+                }
+                return
+
+            message = response.message
+            self._memory.add_assistant(message)
 
             trace = AgentStepTrace(
                 step=step,
@@ -86,19 +128,11 @@ class Agent:
                 completion_tokens=response.usage.completion_tokens,
                 cost_usd=response.usage.total_cost_usd,
             )
-            result.total_cost_usd += response.usage.total_cost_usd
+            total_cost += response.usage.total_cost_usd
 
-            message = response.message
-            self._memory.add_assistant(message)
-
-            tool_calls = message.get("tool_calls") or []
-            if not tool_calls:
-                result.final_text = message.get("content") or ""
-                result.steps.append(trace)
-                result.stopped_reason = "completed"
-                return result
-
-            for tc in tool_calls:
+            raw_tool_calls = message.get("tool_calls") or []
+            parsed_calls: list[dict[str, Any]] = []
+            for tc in raw_tool_calls:
                 tc_id = tc.get("id", "")
                 fn = tc.get("function") or {}
                 name = fn.get("name", "")
@@ -108,30 +142,68 @@ class Agent:
                 except json.JSONDecodeError:
                     args = {}
                     logger.warning("Tool %s: invalid JSON arguments %r", name, raw_args)
+                parsed_calls.append({"id": tc_id, "name": name, "arguments": args})
+            trace.tool_calls = parsed_calls
 
-                trace.tool_calls.append({"id": tc_id, "name": name, "arguments": args})
-                logger.info("Step %d: calling tool %s(%s)", step, name, args)
+            yield {
+                "type": "assistant",
+                "step": step,
+                "text": message.get("content"),
+                "tool_calls": parsed_calls,
+                "model": response.model,
+                "cost_usd": response.usage.total_cost_usd,
+            }
 
+            if not parsed_calls:
+                yield {"type": "step", "trace": trace}
+                yield {
+                    "type": "final",
+                    "text": message.get("content") or "",
+                    "stopped_reason": "completed",
+                    "total_cost_usd": total_cost,
+                }
+                return
+
+            for call in parsed_calls:
+                yield {
+                    "type": "tool_call",
+                    "step": step,
+                    "id": call["id"],
+                    "name": call["name"],
+                    "arguments": call["arguments"],
+                }
                 try:
-                    tool_output = await self._mcp.call(name, args)
-                except Exception as exc:  # noqa: BLE001 — surface error back to the LLM
+                    tool_output = await self._mcp.call(call["name"], call["arguments"])
+                    is_error = False
+                except Exception as exc:  # noqa: BLE001
                     tool_output = json.dumps(
-                        {"error": f"{type(exc).__name__}: {exc}", "tool": name}
+                        {"error": f"{type(exc).__name__}: {exc}", "tool": call["name"]}
                     )
-                    logger.exception("Tool %s failed", name)
+                    is_error = True
+                    logger.exception("Tool %s failed", call["name"])
 
-                self._memory.add_tool_result(tool_call_id=tc_id, name=name, content=tool_output)
+                self._memory.add_tool_result(
+                    tool_call_id=call["id"], name=call["name"], content=tool_output
+                )
+                yield {
+                    "type": "tool_result",
+                    "step": step,
+                    "id": call["id"],
+                    "name": call["name"],
+                    "content": tool_output,
+                    "error": is_error,
+                }
 
-            result.steps.append(trace)
+            yield {"type": "step", "trace": trace}
 
-        else:
-            result.stopped_reason = "max_steps_reached"
-            # Best-effort: use the last assistant content, if any.
-            last = next(
-                (m for m in reversed(self._memory.messages) if m.get("role") == "assistant"),
-                None,
-            )
-            if last and last.get("content"):
-                result.final_text = last["content"]
-
-        return result
+        # max_steps reached without a final assistant-only message
+        last = next(
+            (m for m in reversed(self._memory.messages) if m.get("role") == "assistant"),
+            None,
+        )
+        yield {
+            "type": "final",
+            "text": (last or {}).get("content") or "",
+            "stopped_reason": "max_steps_reached",
+            "total_cost_usd": total_cost,
+        }

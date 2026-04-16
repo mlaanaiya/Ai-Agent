@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="en" class="h-full">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>AI Agent — Drive Assistant</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            ink: {
+              950: "#09090b",
+              900: "#0f1014",
+              800: "#141519",
+              700: "#1c1d22",
+              600: "#26272e",
+              500: "#3a3b42",
+              400: "#6b6d76",
+              300: "#a1a3ac",
+              200: "#d4d4d8",
+              100: "#f4f4f5",
+            },
+            brand: {
+              DEFAULT: "#c084fc",
+              soft:    "#a855f7",
+              strong:  "#7e22ce",
+              accent:  "#22d3ee",
+            },
+          },
+          fontFamily: {
+            sans: ["Inter", "ui-sans-serif", "system-ui"],
+            mono: ["JetBrains Mono", "ui-monospace", "SFMono-Regular", "monospace"],
+          },
+          boxShadow: {
+            glow: "0 0 32px -8px rgba(192, 132, 252, 0.35)",
+          },
+        }
+      }
+    };
+  </script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body class="h-full bg-ink-950 text-ink-100 font-sans antialiased">
+
+<div class="flex h-full min-h-screen">
+
+  <!-- SIDEBAR -->
+  <aside class="hidden md:flex w-72 shrink-0 flex-col border-r border-ink-700 bg-ink-900/60 backdrop-blur">
+    <div class="flex items-center gap-3 px-5 py-4 border-b border-ink-700">
+      <div class="h-9 w-9 rounded-lg bg-gradient-to-br from-brand to-brand-accent shadow-glow flex items-center justify-center">
+        <svg viewBox="0 0 24 24" class="h-5 w-5 text-ink-950" fill="currentColor">
+          <path d="M12 2 3 7v10l9 5 9-5V7l-9-5Zm0 2.2 6.9 3.8-3.5 1.9L8.6 6.1 12 4.2Zm-7 5.1 6 3.3v7.1l-6-3.3V9.3Zm8 10.4v-7.1l6-3.3v7.1l-6 3.3Z"/>
+        </svg>
+      </div>
+      <div>
+        <p class="text-sm font-semibold leading-tight">AI Agent</p>
+        <p class="text-xs text-ink-400">Drive assistant</p>
+      </div>
+    </div>
+
+    <!-- New session -->
+    <div class="px-4 py-3">
+      <button id="new-session" class="w-full inline-flex items-center justify-center gap-2 rounded-lg bg-gradient-to-br from-brand-strong to-brand-soft hover:to-brand text-ink-100 text-sm font-medium py-2 transition shadow-glow">
+        <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+        New session
+      </button>
+    </div>
+
+    <div class="px-4 pb-2 text-xs font-medium uppercase tracking-wider text-ink-400">Sessions</div>
+    <ul id="session-list" class="flex-1 overflow-y-auto px-2 pb-2 space-y-1 text-sm"></ul>
+
+    <div class="border-t border-ink-700 px-4 py-3 text-xs">
+      <div id="status-card" class="space-y-1.5">
+        <div class="flex items-center justify-between">
+          <span class="text-ink-400">OpenRouter</span>
+          <span class="status-dot" data-key="openrouter_configured"></span>
+        </div>
+        <div class="flex items-center justify-between">
+          <span class="text-ink-400">Drive folder</span>
+          <span class="status-dot" data-key="drive_folder_configured"></span>
+        </div>
+        <div class="flex items-center justify-between">
+          <span class="text-ink-400">Service account</span>
+          <span class="status-dot" data-key="service_account_present"></span>
+        </div>
+        <div class="flex items-center justify-between pt-1 border-t border-ink-700 mt-1">
+          <span class="text-ink-400">Model</span>
+          <span id="status-model" class="font-mono text-[11px] text-ink-200 truncate max-w-[140px]">—</span>
+        </div>
+        <div class="flex items-center justify-between">
+          <span class="text-ink-400">Transport</span>
+          <span id="status-transport" class="font-mono text-[11px] text-ink-200">—</span>
+        </div>
+      </div>
+    </div>
+  </aside>
+
+  <!-- MAIN -->
+  <main class="flex-1 flex flex-col min-w-0">
+    <header class="h-14 border-b border-ink-700 bg-ink-900/40 backdrop-blur flex items-center justify-between px-5">
+      <div class="min-w-0">
+        <h1 id="header-title" class="text-sm font-semibold truncate">New conversation</h1>
+        <p class="text-xs text-ink-400">
+          Model: <span id="header-model" class="font-mono text-ink-200">{{ default_model }}</span>
+        </p>
+      </div>
+      <div class="flex items-center gap-4">
+        <div class="text-right text-xs">
+          <p class="text-ink-400">Session cost</p>
+          <p id="cost-display" class="font-mono text-ink-100 text-sm">$0.0000</p>
+        </div>
+        <button id="toggle-panel" class="hidden md:inline-flex items-center gap-1 rounded-md border border-ink-600 hover:border-ink-500 text-xs text-ink-200 px-2 py-1">
+          <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
+          Tools & audit
+        </button>
+      </div>
+    </header>
+
+    <!-- Chat + right-hand panel -->
+    <div class="flex-1 flex min-h-0">
+
+      <!-- Chat stream -->
+      <section class="flex-1 flex flex-col min-w-0">
+        <div id="chat" class="flex-1 overflow-y-auto px-6 py-6 space-y-4">
+          <div id="empty-state" class="h-full flex items-center justify-center text-center">
+            <div class="max-w-md">
+              <div class="inline-flex items-center justify-center h-14 w-14 rounded-2xl bg-gradient-to-br from-brand-strong to-brand-accent shadow-glow mb-4">
+                <svg class="h-7 w-7 text-ink-950" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2 3 7v10l9 5 9-5V7l-9-5Z"/></svg>
+              </div>
+              <h2 class="text-xl font-semibold">Ask anything about your Drive sandbox.</h2>
+              <p class="text-ink-400 mt-2 text-sm">
+                The agent can list, search, read, and save files inside your sandboxed folder.
+                Every action is audited and enforced on the server side.
+              </p>
+              <div class="grid grid-cols-1 gap-2 mt-6 text-left">
+                <button class="suggestion text-sm rounded-lg border border-ink-700 hover:border-brand-soft hover:bg-ink-800 p-3 transition" data-prompt="List the files in the sandbox root.">
+                  <span class="text-brand">›</span> List the files in the sandbox root.
+                </button>
+                <button class="suggestion text-sm rounded-lg border border-ink-700 hover:border-brand-soft hover:bg-ink-800 p-3 transition" data-prompt="Search for documents mentioning 'Q3' and summarise the first match.">
+                  <span class="text-brand">›</span> Search for 'Q3' and summarise the first match.
+                </button>
+                <button class="suggestion text-sm rounded-lg border border-ink-700 hover:border-brand-soft hover:bg-ink-800 p-3 transition" data-prompt="Save a file called hello.txt with the content 'hello from the agent' in the root.">
+                  <span class="text-brand">›</span> Save a file called hello.txt in the root.
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Composer -->
+        <div class="border-t border-ink-700 bg-ink-900/60 backdrop-blur px-5 py-4">
+          <form id="composer" class="flex items-end gap-3 max-w-4xl mx-auto">
+            <div class="flex-1 rounded-xl border border-ink-600 bg-ink-800 focus-within:border-brand-soft focus-within:ring-2 focus-within:ring-brand-soft/30 transition">
+              <textarea id="prompt" rows="1" placeholder="Ask your Drive assistant…  (Shift+Enter for a new line)"
+                class="w-full bg-transparent resize-none outline-none px-4 py-3 text-sm placeholder-ink-400 max-h-60"></textarea>
+            </div>
+            <button id="send" type="submit"
+              class="inline-flex items-center justify-center h-11 w-11 rounded-xl bg-gradient-to-br from-brand-strong to-brand disabled:opacity-40 disabled:cursor-not-allowed hover:from-brand-soft hover:to-brand-accent transition shadow-glow">
+              <svg class="h-5 w-5 text-ink-950" viewBox="0 0 24 24" fill="currentColor"><path d="M3.4 20.4 22 12 3.4 3.6 3 10l13 2-13 2 .4 6.4Z"/></svg>
+            </button>
+          </form>
+          <p class="text-[11px] text-ink-400 mt-2 text-center">
+            Enter to send · Shift+Enter for a newline · Every MCP call is logged to <span class="font-mono">audit/mcp-drive.jsonl</span>
+          </p>
+        </div>
+      </section>
+
+      <!-- Right panel: tools + audit -->
+      <aside id="right-panel" class="hidden lg:flex w-80 shrink-0 flex-col border-l border-ink-700 bg-ink-900/40">
+        <div class="border-b border-ink-700 px-4 py-3">
+          <h3 class="text-xs font-semibold uppercase tracking-wider text-ink-300">MCP tools</h3>
+          <p class="text-[11px] text-ink-400 mt-0.5">Discovered from the Drive gateway</p>
+        </div>
+        <ul id="tools-list" class="px-3 py-2 space-y-2 max-h-64 overflow-y-auto text-sm"></ul>
+
+        <div class="border-y border-ink-700 px-4 py-3 flex items-center justify-between">
+          <div>
+            <h3 class="text-xs font-semibold uppercase tracking-wider text-ink-300">Audit log</h3>
+            <p class="text-[11px] text-ink-400 mt-0.5">Most recent MCP calls</p>
+          </div>
+          <button id="refresh-audit" class="text-xs text-brand hover:text-brand-accent">refresh</button>
+        </div>
+        <ul id="audit-list" class="flex-1 overflow-y-auto px-3 py-2 space-y-2 text-xs"></ul>
+      </aside>
+    </div>
+  </main>
+</div>
+
+<script src="/static/app.js"></script>
+</body>
+</html>

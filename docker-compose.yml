@@ -29,8 +29,26 @@ services:
       - ./audit:/app/audit
     depends_on:
       - mcp-drive
-    # Interactive by default — run with `docker compose run --rm orchestrator chat`.
+    # Interactive CLI — run with `docker compose run --rm orchestrator chat`.
     stdin_open: true
     tty: true
     entrypoint: ["python", "-m", "orchestrator"]
     command: ["chat"]
+
+  web:
+    build: .
+    image: ai-agent:latest
+    container_name: ai-agent-web
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      HOST: "0.0.0.0"
+      PORT: "8000"
+    volumes:
+      - ./secrets:/app/secrets:ro
+      - ./audit:/app/audit
+    ports:
+      - "8000:8000"
+    depends_on:
+      - mcp-drive
+    entrypoint: ["python", "-m", "web"]

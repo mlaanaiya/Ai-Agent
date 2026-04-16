@@ -68,15 +68,40 @@ export DRIVE_ROOT_FOLDER_ID=1AbC...xyz
 #        "Résume le compte-rendu Q3 du dossier Stratégie."
 ```
 
-## Quickstart — fallback runner (no OpenClaw)
+## Quickstart — Web UI (recommended for interactive use)
 
-Useful for CI, demos, or if OpenClaw isn't installed yet.
+The project ships a full-featured web interface (dark theme, live streaming,
+tool call cards, audit panel, multi-session). No separate build step.
 
 ```bash
 python -m venv .venv && source .venv/bin/activate
 pip install -e '.[dev]'
 cp .env.example .env    # fill OPENROUTER_API_KEY and DRIVE_ROOT_FOLDER_ID
 # Place the service account JSON at ./secrets/service_account.json
+
+# Launch the web UI:
+ai-agent-web                              # → http://127.0.0.1:8000
+# Or with a custom bind:
+HOST=0.0.0.0 PORT=8080 ai-agent-web
+```
+
+**Features**:
+- Dark-themed single-page app (Tailwind + vanilla JS, zero build step).
+- Server-Sent Events streaming: see tool calls, arguments, and results
+  appear live as the agent works.
+- Multi-session sidebar with per-session memory and cost tracking.
+- Right panel showing MCP tools discovered from the gateway + live audit
+  log refresh.
+- Suggested prompts for quick-start.
+- Config status indicator (API key / Drive / service account health check).
+
+## Quickstart — CLI fallback (no browser needed)
+
+Useful for CI, demos, or headless environments.
+
+```bash
+pip install -e '.[dev]'
+cp .env.example .env    # fill OPENROUTER_API_KEY and DRIVE_ROOT_FOLDER_ID
 
 ai-agent tools                             # list MCP tools
 ai-agent ask "Summarise the Q3 notes."     # one-shot
@@ -94,13 +119,18 @@ src/
     config.py                 # pydantic settings
   orchestrator/               # fallback runner, only used without OpenClaw
     agent.py, openrouter.py, mcp_client.py, memory.py, cli.py
+  web/                        # FastAPI web interface
+    app.py                    # routes + SSE streaming
+    session_store.py          # in-memory async session registry
+    templates/index.html      # dark-themed SPA (Tailwind CDN)
+    static/app.js, styles.css
 config/
   SOUL.md                     # OpenClaw personality (document analyst)
   AGENTS.md                   # OpenClaw operating rules
   openclaw.config.json5       # OpenClaw config snippet
 scripts/
   register-openclaw.sh        # idempotent `openclaw mcp set` wrapper
-tests/                        # 20 hermetic tests (no net, no creds)
+tests/                        # 27 hermetic tests (no net, no creds)
 docs/ARCHITECTURE.md
 Dockerfile
 docker-compose.yml
@@ -146,7 +176,8 @@ All 20 tests are offline (mocked HTTP, in-memory MCP transport, fake Drive)
 ```bash
 docker compose build
 docker compose up -d mcp-drive        # daemonise the MCP gateway (prod path)
-docker compose run --rm orchestrator chat   # fallback runner, for dev/demo
+docker compose up -d web              # web UI at http://localhost:8000
+docker compose run --rm orchestrator chat   # CLI fallback, for dev/demo
 ```
 
 On a Gandi VPS, run only the `mcp-drive` service, expose the streamable
