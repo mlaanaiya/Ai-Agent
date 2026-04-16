@@ -208,6 +208,30 @@ def create_app(settings: OrchestratorSettings | None = None) -> FastAPI:
                 continue
         return out
 
+    @app.post("/api/webhook")
+    async def webhook_trigger(payload: dict[str, Any]) -> dict[str, Any]:
+        """Trigger a one-shot prompt via HTTP (for external systems, cron, etc.).
+
+        Accepts: {"prompt": "...", "model": "...(opt)"}
+        Returns: {"status": "ok"|"error", "text": "...", "cost_usd": float}
+        """
+        prompt = (payload.get("prompt") or "").strip()
+        if not prompt:
+            raise HTTPException(status_code=422, detail="prompt is required")
+        entry = await store.create(title=f"webhook:{prompt[:30]}")
+        if payload.get("model"):
+            entry.agent._model = payload["model"]  # type: ignore[attr-defined]
+        async with entry.lock:
+            result = await entry.agent.run(prompt)
+        entry.total_cost_usd += result.total_cost_usd
+        return {
+            "status": result.stopped_reason,
+            "text": result.final_text,
+            "cost_usd": round(result.total_cost_usd, 6),
+            "steps": len(result.steps),
+            "session_id": entry.id,
+        }
+
     return app
 
 

@@ -52,3 +52,30 @@ services:
     depends_on:
       - mcp-drive
     entrypoint: ["python", "-m", "web"]
+
+  telegram:
+    build: .
+    image: ai-agent:latest
+    container_name: ai-agent-telegram
+    restart: unless-stopped
+    env_file: .env
+    volumes:
+      - ./secrets:/app/secrets:ro
+      - ./audit:/app/audit
+    depends_on:
+      - mcp-drive
+    entrypoint: ["python", "-m", "telegram_bot"]
+
+  scheduler:
+    build: .
+    image: ai-agent:latest
+    container_name: ai-agent-scheduler
+    restart: unless-stopped
+    env_file: .env
+    volumes:
+      - ./secrets:/app/secrets:ro
+      - ./audit:/app/audit
+      - ./config:/app/config:ro
+    depends_on:
+      - mcp-drive
+    entrypoint: ["python", "-m", "automation"]

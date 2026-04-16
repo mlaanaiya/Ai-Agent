@@ -288,6 +288,111 @@ class DriveClient:
             raise DriveError(f"Drive upload failed: {exc}") from exc
         return _to_drive_file(created)
 
+    def create_folder(self, name: str, parent_id: str | None = None) -> DriveFile:
+        if not name or "/" in name:
+            raise DriveError("create_folder: 'name' must be non-empty and contain no '/'.")
+        parent = parent_id or self._root
+        self._assert_in_sandbox(parent)
+        body = {
+            "name": name,
+            "mimeType": "application/vnd.google-apps.folder",
+            "parents": [parent],
+        }
+        try:
+            created = (
+                self._svc.files()
+                .create(
+                    body=body,
+                    fields="id,name,mimeType,size,modifiedTime,parents",
+                    supportsAllDrives=True,
+                )
+                .execute()
+            )
+        except HttpError as exc:
+            raise DriveError(f"Drive create folder failed: {exc}") from exc
+        return _to_drive_file(created)
+
+    def get_metadata(self, file_id: str) -> dict[str, Any]:
+        self._assert_in_sandbox(file_id)
+        try:
+            meta = (
+                self._svc.files()
+                .get(
+                    fileId=file_id,
+                    fields="id,name,mimeType,size,modifiedTime,parents,webViewLink,description",
+                    supportsAllDrives=True,
+                )
+                .execute()
+            )
+        except HttpError as exc:
+            raise DriveError(f"Drive metadata lookup failed: {exc}") from exc
+        return {
+            "id": meta["id"],
+            "name": meta.get("name", ""),
+            "mime_type": meta.get("mimeType", ""),
+            "size": int(meta["size"]) if meta.get("size") else None,
+            "modified_time": meta.get("modifiedTime"),
+            "parents": meta.get("parents", []),
+            "web_link": meta.get("webViewLink"),
+            "description": meta.get("description"),
+        }
+
+    def move_file(self, file_id: str, new_parent_id: str) -> DriveFile:
+        self._assert_in_sandbox(file_id)
+        self._assert_in_sandbox(new_parent_id)
+        try:
+            meta = (
+                self._svc.files()
+                .get(fileId=file_id, fields="parents", supportsAllDrives=True)
+                .execute()
+            )
+            previous_parents = ",".join(meta.get("parents", []))
+            updated = (
+                self._svc.files()
+                .update(
+                    fileId=file_id,
+                    addParents=new_parent_id,
+                    removeParents=previous_parents,
+                    fields="id,name,mimeType,size,modifiedTime,parents",
+                    supportsAllDrives=True,
+                )
+                .execute()
+            )
+        except HttpError as exc:
+            raise DriveError(f"Drive move failed: {exc}") from exc
+        return _to_drive_file(updated)
+
+    def rename_file(self, file_id: str, new_name: str) -> DriveFile:
+        if not new_name or "/" in new_name:
+            raise DriveError("rename_file: new_name must be non-empty and contain no '/'.")
+        self._assert_in_sandbox(file_id)
+        try:
+            updated = (
+                self._svc.files()
+                .update(
+                    fileId=file_id,
+                    body={"name": new_name},
+                    fields="id,name,mimeType,size,modifiedTime,parents",
+                    supportsAllDrives=True,
+                )
+                .execute()
+            )
+        except HttpError as exc:
+            raise DriveError(f"Drive rename failed: {exc}") from exc
+        return _to_drive_file(updated)
+
+    def delete_file(self, file_id: str) -> dict[str, str]:
+        self._assert_in_sandbox(file_id)
+        if file_id == self._root:
+            raise DriveError("Cannot delete the sandbox root folder.")
+        try:
+            self._svc.files().delete(
+                fileId=file_id, supportsAllDrives=True
+            ).execute()
+        except HttpError as exc:
+            raise DriveError(f"Drive delete failed: {exc}") from exc
+        return {"id": file_id, "status": "deleted"}
+
 
 def _to_drive_file(raw: dict[str, Any]) -> DriveFile:
     size_raw = raw.get("size")
