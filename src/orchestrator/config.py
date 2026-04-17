@@ -17,7 +17,17 @@ class OrchestratorSettings(BaseSettings):
         case_sensitive=False,
     )
 
-    # Ollama (local LLM)
+    # LLM backend selection
+    llm_backend: Literal["gemini", "ollama"] = Field(
+        default="gemini", alias="LLM_BACKEND"
+    )
+
+    # Gemini (free tier — default)
+    gemini_api_key: str = Field(default="", alias="GEMINI_API_KEY")
+    gemini_model: str = Field(default="gemini-2.0-flash", alias="GEMINI_MODEL")
+    gemini_timeout: float = Field(default=120.0, alias="GEMINI_TIMEOUT")
+
+    # Ollama (local fallback)
     ollama_base_url: str = Field(
         default="http://localhost:11434/v1", alias="OLLAMA_BASE_URL"
     )
@@ -39,7 +49,18 @@ class OrchestratorSettings(BaseSettings):
     max_steps: int = Field(default=8, alias="AGENT_MAX_STEPS")
     log_level: str = Field(default="INFO", alias="AGENT_LOG_LEVEL")
 
+    @property
+    def active_model_name(self) -> str:
+        if self.llm_backend == "gemini":
+            return self.gemini_model
+        return self.ollama_default_model
+
     def ensure_valid(self) -> None:
+        if self.llm_backend == "gemini" and not self.gemini_api_key:
+            raise RuntimeError(
+                "GEMINI_API_KEY must be set when LLM_BACKEND=gemini. "
+                "Get a free key at https://aistudio.google.com/apikey"
+            )
         if self.mcp_transport == "http" and not self.mcp_server_url:
             raise RuntimeError("MCP_SERVER_URL is required when MCP_TRANSPORT=http.")
         if self.max_steps <= 0:

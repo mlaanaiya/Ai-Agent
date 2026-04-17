@@ -38,7 +38,8 @@ class AuditEntry(BaseModel):
 
 
 class ConfigStatus(BaseModel):
-    ollama_reachable: bool
+    llm_backend: str
+    llm_configured: bool
     drive_folder_configured: bool
     service_account_present: bool
     mcp_transport: str

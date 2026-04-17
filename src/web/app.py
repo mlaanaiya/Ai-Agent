@@ -60,7 +60,7 @@ def create_app(settings: OrchestratorSettings | None = None) -> FastAPI:
         return templates.TemplateResponse(
             request,
             "index.html",
-            {"default_model": settings.ollama_default_model},
+            {"default_model": settings.active_model_name},
         )
 
     @app.get("/api/config", response_model=ConfigStatus)
@@ -78,15 +78,19 @@ def create_app(settings: OrchestratorSettings | None = None) -> FastAPI:
         except Exception:  # noqa: BLE001
             pass
         sa_present = Path(sa_path).exists()
-        ollama_ok = await _check_ollama(settings.ollama_base_url)
+        if settings.llm_backend == "gemini":
+            llm_ok = bool(settings.gemini_api_key)
+        else:
+            llm_ok = await _check_ollama(settings.ollama_base_url)
         return ConfigStatus(
-            ollama_reachable=ollama_ok,
+            llm_backend=settings.llm_backend,
+            llm_configured=llm_ok,
             drive_folder_configured=has_drive,
             service_account_present=sa_present,
             mcp_transport=settings.mcp_transport,
-            default_model=settings.ollama_default_model,
+            default_model=settings.active_model_name,
             audit_log_path=str(audit_path),
-            ready=ollama_ok and (has_drive or settings.mcp_transport == "http"),
+            ready=llm_ok and (has_drive or settings.mcp_transport == "http"),
         )
 
     @app.get("/api/tools", response_model=list[ToolInfo])

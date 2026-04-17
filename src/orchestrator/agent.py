@@ -2,7 +2,7 @@
 
 A single `run` call:
   1. Adds the user's prompt to memory.
-  2. Calls the LLM (Ollama) with the MCP-discovered tools.
+  2. Calls the LLM (Gemini or Ollama) with the MCP-discovered tools.
   3. If the model requests tool calls, executes them via the MCP gateway,
      appends the results, and loops.
   4. Stops when the model returns a final assistant message (no tool_calls)
@@ -15,11 +15,23 @@ import json
 import logging
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Protocol
 
 from .mcp_client import MCPGateway
 from .memory import ConversationMemory
-from .ollama import OllamaClient
+
+
+class LLMClient(Protocol):
+    """Any LLM client that implements chat()."""
+
+    async def chat(
+        self,
+        messages: list[dict[str, Any]],
+        *,
+        model: str | None = None,
+        tools: list[dict[str, Any]] | None = None,
+        **kwargs: Any,
+    ) -> Any: ...
 
 logger = logging.getLogger(__name__)
 
@@ -46,7 +58,7 @@ class AgentResult:
 class Agent:
     def __init__(
         self,
-        llm: OllamaClient,
+        llm: Any,
         mcp: MCPGateway,
         system_prompt: str,
         *,

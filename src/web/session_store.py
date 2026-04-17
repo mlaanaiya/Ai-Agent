@@ -16,8 +16,8 @@ from typing import Any
 
 from orchestrator.agent import Agent
 from orchestrator.config import OrchestratorSettings
+from orchestrator.llm import build_llm
 from orchestrator.mcp_client import MCPGateway
-from orchestrator.ollama import OllamaClient
 
 
 @dataclass(slots=True)
@@ -25,7 +25,7 @@ class SessionEntry:
     id: str
     title: str
     created_at: datetime
-    llm: OllamaClient
+    llm: Any
     mcp: MCPGateway
     agent: Agent
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
@@ -55,11 +55,7 @@ class SessionStore:
     async def create(self, title: str | None = None) -> SessionEntry:
         async with self._lock:
             sid = uuid.uuid4().hex[:12]
-            llm = OllamaClient(
-                base_url=self._settings.ollama_base_url,
-                default_model=self._settings.ollama_default_model,
-                timeout=self._settings.ollama_timeout,
-            )
+            llm = build_llm(self._settings)
             mcp = await self._connect_mcp()
             agent = Agent(
                 llm=llm,

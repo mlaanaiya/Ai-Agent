@@ -125,7 +125,8 @@ def test_config_endpoint(client: TestClient) -> None:
     res = client.get("/api/config")
     assert res.status_code == 200
     data = res.json()
-    assert "ollama_reachable" in data
+    assert "llm_configured" in data
+    assert "llm_backend" in data
     assert "default_model" in data
     assert "mcp_transport" in data
 

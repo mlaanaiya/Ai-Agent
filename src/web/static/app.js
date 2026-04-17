@@ -54,6 +54,10 @@ async function loadConfig() {
     $("#status-model").textContent = cfg.default_model;
     $("#status-transport").textContent = cfg.mcp_transport;
     $("#header-model").textContent = cfg.default_model;
+    const llmLabel = $("#status-llm-label");
+    if (llmLabel) llmLabel.textContent = (cfg.llm_backend || "llm").charAt(0).toUpperCase() + (cfg.llm_backend || "llm").slice(1);
+    const inf = $("#status-inference");
+    if (inf) inf.textContent = cfg.llm_backend === "gemini" ? "cloud · free" : "local · free";
   } catch (e) { console.error("config:", e); }
 }
 

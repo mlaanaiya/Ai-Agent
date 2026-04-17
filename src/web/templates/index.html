@@ -115,8 +115,8 @@
     <div class="border-t border-ink-700 px-4 py-3 text-xs">
       <div id="status-card" class="space-y-1.5">
         <div class="flex items-center justify-between">
-          <span class="text-ink-400">Ollama</span>
-          <span class="status-dot" data-key="ollama_reachable"></span>
+          <span class="text-ink-400" id="status-llm-label">LLM</span>
+          <span class="status-dot" data-key="llm_configured"></span>
         </div>
         <div class="flex items-center justify-between">
           <span class="text-ink-400">Drive folder</span>
@@ -136,7 +136,7 @@
         </div>
         <div class="flex items-center justify-between">
           <span class="text-ink-400">Inference</span>
-          <span class="font-mono text-[11px] text-green-400">local &middot; free</span>
+          <span id="status-inference" class="font-mono text-[11px] text-green-400">free</span>
         </div>
       </div>
     </div>

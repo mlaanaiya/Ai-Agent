@@ -18,8 +18,8 @@ from typing import Any
 
 from orchestrator.agent import Agent, AgentResult
 from orchestrator.config import OrchestratorSettings
+from orchestrator.llm import build_llm
 from orchestrator.mcp_client import MCPGateway
-from orchestrator.ollama import OllamaClient
 
 logger = logging.getLogger(__name__)
 
@@ -116,11 +116,7 @@ class Scheduler:
     async def run_once(self, job: JobDefinition) -> JobRun:
         """Execute a single job and return the run record."""
         started = datetime.now(timezone.utc).isoformat(timespec="seconds")
-        llm = OllamaClient(
-            base_url=self._settings.ollama_base_url,
-            default_model=self._settings.ollama_default_model,
-            timeout=self._settings.ollama_timeout,
-        )
+        llm = build_llm(self._settings)
         mcp: MCPGateway | None = None
         try:
             if self._settings.mcp_transport == "http":
