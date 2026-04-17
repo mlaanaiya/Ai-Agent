@@ -1,19 +1,45 @@
-// Minimal SPA that talks to the FastAPI backend over fetch + SSE.
+// AI Agent — enhanced SPA with markdown, toasts, export, keyboard shortcuts.
 
 const state = {
   sessionId: null,
   cost: 0,
-  currentAssistantEl: null,   // the currently-streaming assistant bubble
-  toolCards: {},              // id -> DOM element for pending tool calls
+  currentAssistantEl: null,
+  toolCards: {},
+  allSessions: [],
 };
 
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => Array.from(document.querySelectorAll(sel));
 
-// ---------- initial load ----------------------------------------------------
+// ---------- markdown setup -------------------------------------------------
+if (typeof marked !== "undefined") {
+  marked.setOptions({
+    breaks: true,
+    gfm: true,
+    highlight: function (code, lang) {
+      if (typeof hljs !== "undefined" && lang && hljs.getLanguage(lang)) {
+        try { return hljs.highlight(code, { language: lang }).value; } catch {}
+      }
+      return code;
+    },
+  });
+}
+
+function renderMarkdown(text) {
+  if (typeof marked !== "undefined" && text) {
+    try { return marked.parse(text); } catch { return escapeHtml(text); }
+  }
+  return escapeHtml(text || "");
+}
+
+// ---------- initial load ---------------------------------------------------
 async function boot() {
   await Promise.all([loadConfig(), loadTools(), loadSessions(), loadAudit()]);
-  setInterval(loadAudit, 6000);
+  setInterval(loadAudit, 8000);
+  setupKeyboardShortcuts();
+  setupPanelTabs();
+  setupMobileSidebar();
+  setupSessionSearch();
 }
 
 async function loadConfig() {
@@ -43,35 +69,46 @@ async function loadTools() {
       return;
     }
     list.innerHTML = "";
+    const icons = {
+      list_files: "📁", search_drive: "🔍", read_document: "📄",
+      save_file: "💾", create_folder: "📂", get_metadata: "ℹ️",
+      move_file: "➡️", rename_file: "✏️", delete_file: "🗑️",
+    };
     tools.forEach((t) => {
       const li = document.createElement("li");
       li.className = "tool-item";
-      li.innerHTML = `<div class="name">${t.name}</div><div class="desc">${escapeHtml(t.description)}</div>`;
+      const icon = icons[t.name] || "🔧";
+      li.innerHTML = `<div class="name">${icon} ${t.name}</div><div class="desc">${escapeHtml(t.description)}</div>`;
       list.appendChild(li);
     });
   } catch (e) {
-    list.innerHTML = `<li class="text-ink-400 text-xs px-1">Unavailable (${escapeHtml(String(e))}).</li>`;
+    list.innerHTML = `<li class="text-ink-400 text-xs px-1">Unavailable</li>`;
   }
 }
 
 async function loadSessions() {
   try {
     const res = await fetch("/api/sessions");
-    const sessions = await res.json();
-    renderSessions(sessions);
+    state.allSessions = await res.json();
+    renderSessions(state.allSessions);
   } catch (e) { console.error("sessions:", e); }
 }
 
 function renderSessions(sessions) {
   const list = $("#session-list");
   list.innerHTML = "";
+  if (!sessions.length) {
+    list.innerHTML = '<li class="text-ink-500 text-xs px-3 py-2">No sessions yet</li>';
+    return;
+  }
   sessions.forEach((s) => {
     const li = document.createElement("li");
     li.className = "session-item" + (s.id === state.sessionId ? " active" : "");
     li.dataset.id = s.id;
     li.innerHTML = `
-      <svg class="h-3.5 w-3.5 text-ink-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+      <svg class="h-3.5 w-3.5 text-ink-400 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
       <span class="title" title="${escapeHtml(s.title)}">${escapeHtml(s.title)}</span>
+      <span class="text-[10px] text-ink-500 shrink-0">${s.message_count}</span>
       <button class="delete" title="delete session">
         <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/></svg>
       </button>`;
@@ -80,9 +117,11 @@ function renderSessions(sessions) {
         await fetch(`/api/sessions/${s.id}`, { method: "DELETE" });
         if (state.sessionId === s.id) resetConversation();
         await loadSessions();
+        showToast("Session deleted", "info");
         return;
       }
       await openSession(s.id);
+      closeMobileSidebar();
     });
     list.appendChild(li);
   });
@@ -94,19 +133,18 @@ async function openSession(id) {
   state.currentAssistantEl = null;
   state.toolCards = {};
   const chat = $("#chat");
-  chat.innerHTML = '<div class="text-center text-ink-400 text-xs py-6">Loading session…</div>';
+  chat.innerHTML = '<div class="text-center text-ink-400 text-xs py-6 animate-fade-in">Loading session…</div>';
   try {
     const res = await fetch(`/api/sessions/${id}/transcript`);
     if (!res.ok) throw new Error(await res.text());
     const data = await res.json();
     chat.innerHTML = "";
     $("#header-title").textContent = data.title;
-    $("#cost-display").textContent = fmtCost(data.total_cost_usd);
     state.cost = data.total_cost_usd;
     data.transcript.forEach(replayEvent);
     await loadSessions();
   } catch (e) {
-    chat.innerHTML = `<div class="text-red-400 text-sm">Failed to load session: ${escapeHtml(String(e))}</div>`;
+    chat.innerHTML = `<div class="text-red-400 text-sm animate-fade-in">Failed to load session: ${escapeHtml(String(e))}</div>`;
   }
 }
 
@@ -117,12 +155,11 @@ function resetConversation() {
   state.toolCards = {};
   $("#chat").innerHTML = "";
   $("#header-title").textContent = "New conversation";
-  $("#cost-display").textContent = "$0.0000";
 }
 
 async function loadAudit() {
   try {
-    const res = await fetch("/api/audit?limit=15");
+    const res = await fetch("/api/audit?limit=20");
     if (!res.ok) return;
     const entries = await res.json();
     const list = $("#audit-list");
@@ -136,19 +173,18 @@ async function loadAudit() {
       li.className = "audit-item " + e.status;
       li.innerHTML = `
         <div><span class="tool">${escapeHtml(e.tool)}</span>
-             <span class="text-ink-400">·</span>
+             <span class="text-ink-500">&middot;</span>
              <span class="${e.status === 'ok' ? 'text-green-400' : 'text-red-400'}">${escapeHtml(e.status)}</span>
-             <span class="text-ink-400">·</span>
+             <span class="text-ink-500">&middot;</span>
              <span class="text-ink-300">${e.duration_ms}ms</span></div>
         <div class="ts">${e.ts}</div>
-        ${e.error ? `<div class="text-red-400 text-[11px]">${escapeHtml(e.error)}</div>` : ""}
-      `;
+        ${e.error ? `<div class="text-red-400 text-[11px] mt-0.5">${escapeHtml(e.error)}</div>` : ""}`;
       list.appendChild(li);
     });
   } catch (e) { /* silent */ }
 }
 
-// ---------- chat streaming --------------------------------------------------
+// ---------- chat streaming -------------------------------------------------
 async function sendPrompt(prompt) {
   if (!prompt.trim()) return;
   hideEmptyState();
@@ -161,19 +197,18 @@ async function sendPrompt(prompt) {
     const res = await fetch("/api/chat", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        prompt,
-        session_id: state.sessionId,
-      }),
+      body: JSON.stringify({ prompt, session_id: state.sessionId }),
     });
     if (!res.ok || !res.body) {
       const err = await res.text();
       addAssistantBubble(`Error: ${err}`);
+      showToast("Failed to send message", "error");
       return;
     }
     await consumeSSE(res.body);
   } catch (e) {
     addAssistantBubble(`Network error: ${e.message}`);
+    showToast("Network error", "error");
   } finally {
     setSending(false);
     await loadSessions();
@@ -218,17 +253,17 @@ function handleEvent(type, payload) {
       $("#header-title").textContent = payload.title || "Conversation";
       break;
     case "user":
-      break; // already displayed
+      break;
     case "llm_start":
       ensureAssistantBubble(true);
       break;
     case "assistant":
-      if (payload.text) setAssistantText(payload.text);
+      if (payload.text) setAssistantContent(payload.text);
       break;
     case "tool_call": {
       const card = addToolCard(payload);
       state.toolCards[payload.id] = card;
-      state.currentAssistantEl = null; // next assistant event starts fresh
+      state.currentAssistantEl = null;
       break;
     }
     case "tool_result": {
@@ -237,23 +272,16 @@ function handleEvent(type, payload) {
       break;
     }
     case "step":
-      if (payload.trace && typeof payload.trace.cost_usd === "number") {
-        state.cost += payload.trace.cost_usd;
-        $("#cost-display").textContent = fmtCost(state.cost);
-      }
       break;
     case "final":
-      if (payload.text) setAssistantText(payload.text);
-      if (typeof payload.total_cost_usd === "number") {
-        state.cost = payload.total_cost_usd;
-        $("#cost-display").textContent = fmtCost(state.cost);
-      }
+      if (payload.text) setAssistantContent(payload.text);
       if (payload.stopped_reason && payload.stopped_reason !== "completed") {
         addNote(`Stopped: ${payload.stopped_reason}`);
       }
       break;
     case "error":
       addNote(`Error: ${payload.message}`, true);
+      showToast(payload.message, "error");
       break;
     case "done":
       break;
@@ -261,13 +289,12 @@ function handleEvent(type, payload) {
 }
 
 function replayEvent(payload) {
-  // Re-render an event loaded from transcript (server state restored).
   switch (payload.type) {
     case "user": addUserBubble(payload.text); break;
     case "assistant":
       if (payload.text) {
         ensureAssistantBubble();
-        setAssistantText(payload.text);
+        setAssistantContent(payload.text);
         state.currentAssistantEl = null;
       }
       break;
@@ -284,57 +311,98 @@ function replayEvent(payload) {
     case "final":
       if (payload.text) {
         ensureAssistantBubble();
-        setAssistantText(payload.text);
+        setAssistantContent(payload.text);
         state.currentAssistantEl = null;
       }
       break;
   }
 }
 
-// ---------- DOM helpers -----------------------------------------------------
+// ---------- DOM helpers ----------------------------------------------------
 function addUserBubble(text) {
-  const el = document.createElement("div");
-  el.className = "msg msg-user";
-  el.textContent = text;
-  $("#chat").appendChild(el);
+  const row = document.createElement("div");
+  row.className = "msg-row msg-row-user";
+  const avatar = document.createElement("div");
+  avatar.className = "msg-avatar avatar-user";
+  avatar.textContent = "U";
+  const bubble = document.createElement("div");
+  bubble.className = "msg msg-user";
+  bubble.textContent = text;
+  addCopyButton(bubble, text);
+  row.appendChild(bubble);
+  row.appendChild(avatar);
+  $("#chat").appendChild(row);
   scrollChat();
 }
 
 function ensureAssistantBubble(showTyping = false) {
   if (!state.currentAssistantEl) {
-    const el = document.createElement("div");
-    el.className = "msg msg-assistant";
+    const row = document.createElement("div");
+    row.className = "msg-row msg-row-assistant";
+    const avatar = document.createElement("div");
+    avatar.className = "msg-avatar avatar-assistant";
+    avatar.innerHTML = '<svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2 3 7v10l9 5 9-5V7l-9-5Z"/></svg>';
+    const bubble = document.createElement("div");
+    bubble.className = "msg msg-assistant";
     if (showTyping) {
-      el.innerHTML = '<span class="typing"><span></span><span></span><span></span></span>';
+      bubble.innerHTML = '<span class="typing"><span></span><span></span><span></span></span>';
     }
-    $("#chat").appendChild(el);
-    state.currentAssistantEl = el;
+    row.appendChild(avatar);
+    row.appendChild(bubble);
+    $("#chat").appendChild(row);
+    state.currentAssistantEl = bubble;
     scrollChat();
   }
   return state.currentAssistantEl;
 }
 
-function setAssistantText(text) {
+function setAssistantContent(text) {
   const el = ensureAssistantBubble();
-  el.textContent = text;
+  el.innerHTML = renderMarkdown(text);
+  addCopyButton(el, text);
+  // Re-highlight code blocks
+  if (typeof hljs !== "undefined") {
+    el.querySelectorAll("pre code").forEach((block) => {
+      try { hljs.highlightElement(block); } catch {}
+    });
+  }
   scrollChat();
 }
 
 function addAssistantBubble(text) {
   state.currentAssistantEl = null;
   const el = ensureAssistantBubble();
-  el.textContent = text;
+  el.innerHTML = renderMarkdown(text);
   state.currentAssistantEl = null;
 }
 
+function addCopyButton(el, rawText) {
+  el.style.position = "relative";
+  const btn = document.createElement("button");
+  btn.className = "msg-copy";
+  btn.textContent = "copy";
+  btn.onclick = (e) => {
+    e.stopPropagation();
+    navigator.clipboard.writeText(rawText).then(() => {
+      btn.textContent = "copied!";
+      setTimeout(() => { btn.textContent = "copy"; }, 1500);
+    });
+  };
+  el.appendChild(btn);
+}
+
 function addToolCard(payload) {
+  const icons = {
+    list_files: "📁", search_drive: "🔍", read_document: "📄",
+    save_file: "💾", create_folder: "📂", get_metadata: "ℹ️",
+    move_file: "➡️", rename_file: "✏️", delete_file: "🗑️",
+  };
+  const icon = icons[payload.name] || "🔧";
   const card = document.createElement("div");
   card.className = "tool-card";
   card.innerHTML = `
     <div class="tool-card-header">
-      <svg class="h-3.5 w-3.5 text-brand" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-        <path d="M14.7 6.3a4 4 0 0 1 5 5L17 14l3 3-3 3-3-3-2.7 2.7a4 4 0 0 1-5-5L7 12l-3-3 3-3 3 3 1.7-1.7Z"/>
-      </svg>
+      <span style="font-size:0.9rem">${icon}</span>
       <span class="tool-name">${escapeHtml(payload.name)}</span>
       <span class="tool-status running">running…</span>
     </div>
@@ -361,23 +429,25 @@ function updateToolCard(card, payload) {
     status.className = "tool-status ok";
   }
   const body = card.querySelector(".tool-card-body");
+  body.appendChild(Object.assign(document.createElement("span"), { className: "label", textContent: "result" }));
   const resultPre = document.createElement("pre");
   resultPre.textContent = prettyMaybeJson(payload.content);
-  body.appendChild(Object.assign(document.createElement("span"), { className: "label", textContent: "result" }));
   body.appendChild(resultPre);
   scrollChat();
 }
 
 function addNote(text, isError = false) {
   const el = document.createElement("div");
-  el.className = "text-xs text-center " + (isError ? "text-red-400" : "text-ink-400");
+  el.className = "text-xs text-center py-1 animate-fade-in " + (isError ? "text-red-400" : "text-ink-400");
   el.textContent = text;
   $("#chat").appendChild(el);
   scrollChat();
 }
 
 function setSending(sending) {
-  $("#send").disabled = sending;
+  const btn = $("#send");
+  btn.disabled = sending;
+  btn.classList.toggle("thinking", sending);
   $("#prompt").disabled = sending;
 }
 
@@ -388,14 +458,154 @@ function hideEmptyState() {
 
 function scrollChat() {
   const chat = $("#chat");
-  chat.scrollTop = chat.scrollHeight;
+  chat.scrollTo({ top: chat.scrollHeight, behavior: "smooth" });
 }
 
-function fmtCost(v) {
-  const n = Number(v) || 0;
-  return "$" + n.toFixed(4);
+// ---------- toast system ---------------------------------------------------
+function showToast(message, type = "info") {
+  const container = $("#toast-container");
+  const toast = document.createElement("div");
+  toast.className = `toast ${type}`;
+  const icons = { success: "✓", error: "✕", info: "ℹ" };
+  toast.innerHTML = `<span style="font-weight:bold;font-size:1rem">${icons[type] || "ℹ"}</span><span>${escapeHtml(message)}</span>`;
+  container.appendChild(toast);
+  setTimeout(() => {
+    toast.classList.add("removing");
+    setTimeout(() => toast.remove(), 300);
+  }, 4000);
 }
 
+// ---------- export ---------------------------------------------------------
+function exportConversation() {
+  const chat = $("#chat");
+  if (!chat || !chat.children.length) {
+    showToast("No conversation to export", "info");
+    return;
+  }
+  // Build plain text from transcript
+  let text = `AI Agent — Conversation Export\n${"=".repeat(40)}\n\n`;
+  chat.querySelectorAll(".msg-row, .tool-card, .msg").forEach((el) => {
+    if (el.classList.contains("msg-row-user")) {
+      const msg = el.querySelector(".msg-user");
+      if (msg) text += `USER:\n${msg.textContent.replace("copy", "").trim()}\n\n`;
+    } else if (el.classList.contains("msg-row-assistant")) {
+      const msg = el.querySelector(".msg-assistant");
+      if (msg) text += `ASSISTANT:\n${msg.textContent.replace("copy", "").trim()}\n\n`;
+    } else if (el.classList.contains("tool-card")) {
+      const name = el.querySelector(".tool-name")?.textContent || "";
+      const status = el.querySelector(".tool-status")?.textContent || "";
+      text += `[TOOL: ${name} → ${status}]\n\n`;
+    }
+  });
+
+  const blob = new Blob([text], { type: "text/plain" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `ai-agent-conversation-${new Date().toISOString().slice(0, 10)}.txt`;
+  a.click();
+  URL.revokeObjectURL(url);
+  showToast("Conversation exported", "success");
+}
+
+// ---------- keyboard shortcuts ---------------------------------------------
+function setupKeyboardShortcuts() {
+  document.addEventListener("keydown", (e) => {
+    // Ctrl+N — new session
+    if (e.ctrlKey && e.key === "n") {
+      e.preventDefault();
+      $("#new-session").click();
+    }
+    // Ctrl+E — export
+    if (e.ctrlKey && e.key === "e") {
+      e.preventDefault();
+      exportConversation();
+    }
+    // Ctrl+/ — shortcuts modal
+    if (e.ctrlKey && e.key === "/") {
+      e.preventDefault();
+      toggleShortcuts();
+    }
+    // Escape — close modal
+    if (e.key === "Escape") {
+      const modal = $("#shortcuts-modal");
+      if (!modal.classList.contains("hidden")) {
+        modal.classList.add("hidden");
+      }
+      closeMobileSidebar();
+    }
+  });
+}
+
+function toggleShortcuts() {
+  const modal = $("#shortcuts-modal");
+  modal.classList.toggle("hidden");
+}
+
+// ---------- panel tabs -----------------------------------------------------
+function setupPanelTabs() {
+  $$(".panel-tab").forEach((tab) => {
+    tab.addEventListener("click", () => {
+      $$(".panel-tab").forEach((t) => t.classList.remove("active"));
+      tab.classList.add("active");
+      $$(".panel-tab-content").forEach((c) => c.classList.add("hidden"));
+      const target = $(`#tab-${tab.dataset.tab}`);
+      if (target) target.classList.remove("hidden");
+    });
+  });
+}
+
+// ---------- mobile sidebar -------------------------------------------------
+function setupMobileSidebar() {
+  const menuBtn = $("#mobile-menu");
+  if (menuBtn) {
+    menuBtn.addEventListener("click", toggleMobileSidebar);
+  }
+}
+
+function toggleMobileSidebar() {
+  const sidebar = $("#sidebar");
+  sidebar.classList.toggle("open");
+  // Add/remove overlay
+  let overlay = $(".sidebar-overlay");
+  if (sidebar.classList.contains("open")) {
+    if (!overlay) {
+      overlay = document.createElement("div");
+      overlay.className = "sidebar-overlay";
+      overlay.addEventListener("click", closeMobileSidebar);
+      sidebar.parentElement.appendChild(overlay);
+    }
+  } else {
+    closeMobileSidebar();
+  }
+}
+
+function closeMobileSidebar() {
+  const sidebar = $("#sidebar");
+  sidebar.classList.remove("open");
+  const overlay = $(".sidebar-overlay");
+  if (overlay) overlay.remove();
+}
+
+// ---------- session search -------------------------------------------------
+function setupSessionSearch() {
+  const input = $("#session-search");
+  if (input) {
+    input.addEventListener("input", () => {
+      const q = input.value.toLowerCase().trim();
+      if (!q) {
+        renderSessions(state.allSessions);
+        return;
+      }
+      const filtered = state.allSessions.filter((s) =>
+        s.title.toLowerCase().includes(q)
+      );
+      renderSessions(filtered);
+    });
+  }
+}
+
+// ---------- utilities ------------------------------------------------------
 function escapeHtml(s) {
   return String(s ?? "")
     .replace(/&/g, "&amp;")
@@ -409,12 +619,18 @@ function prettyMaybeJson(s) {
   if (typeof s !== "string") return String(s);
   const t = s.trim();
   if (t.startsWith("{") || t.startsWith("[")) {
-    try { return JSON.stringify(JSON.parse(t), null, 2); } catch { /* ignore */ }
+    try { return JSON.stringify(JSON.parse(t), null, 2); } catch {}
   }
   return s;
 }
 
-// ---------- events ----------------------------------------------------------
+function autoResize() {
+  const ta = $("#prompt");
+  ta.style.height = "auto";
+  ta.style.height = Math.min(ta.scrollHeight, 240) + "px";
+}
+
+// ---------- events ---------------------------------------------------------
 document.addEventListener("DOMContentLoaded", () => {
   boot();
 
@@ -444,10 +660,15 @@ document.addEventListener("DOMContentLoaded", () => {
     if (res.ok) {
       const s = await res.json();
       await openSession(s.id);
+      showToast("New session created", "success");
+      closeMobileSidebar();
     }
   });
 
-  $("#refresh-audit").addEventListener("click", loadAudit);
+  $("#refresh-audit").addEventListener("click", () => {
+    loadAudit();
+    showToast("Audit refreshed", "info");
+  });
 
   $$(".suggestion").forEach((btn) => {
     btn.addEventListener("click", () => {
@@ -462,9 +683,3 @@ document.addEventListener("DOMContentLoaded", () => {
     $("#right-panel")?.classList.toggle("lg:flex");
   });
 });
-
-function autoResize() {
-  const ta = $("#prompt");
-  ta.style.height = "auto";
-  ta.style.height = Math.min(ta.scrollHeight, 240) + "px";
-}
