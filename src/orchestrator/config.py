@@ -17,17 +17,14 @@ class OrchestratorSettings(BaseSettings):
         case_sensitive=False,
     )
 
-    # OpenRouter
-    openrouter_api_key: str = Field(default="", alias="OPENROUTER_API_KEY")
-    openrouter_base_url: str = Field(
-        default="https://openrouter.ai/api/v1", alias="OPENROUTER_BASE_URL"
+    # Ollama (local LLM)
+    ollama_base_url: str = Field(
+        default="http://localhost:11434/v1", alias="OLLAMA_BASE_URL"
     )
-    openrouter_default_model: str = Field(
-        default="anthropic/claude-3.5-sonnet", alias="OPENROUTER_DEFAULT_MODEL"
+    ollama_default_model: str = Field(
+        default="qwen2.5:7b", alias="OLLAMA_DEFAULT_MODEL"
     )
-    openrouter_max_cost_usd: float = Field(default=1.0, alias="OPENROUTER_MAX_COST_USD")
-    openrouter_app_url: str = Field(default="", alias="OPENROUTER_APP_URL")
-    openrouter_app_name: str = Field(default="ai-agent", alias="OPENROUTER_APP_NAME")
+    ollama_timeout: float = Field(default=180.0, alias="OLLAMA_TIMEOUT")
 
     # MCP transport
     mcp_transport: Literal["stdio", "http"] = Field(default="stdio", alias="MCP_TRANSPORT")
@@ -43,8 +40,6 @@ class OrchestratorSettings(BaseSettings):
     log_level: str = Field(default="INFO", alias="AGENT_LOG_LEVEL")
 
     def ensure_valid(self) -> None:
-        if not self.openrouter_api_key:
-            raise RuntimeError("OPENROUTER_API_KEY must be set.")
         if self.mcp_transport == "http" and not self.mcp_server_url:
             raise RuntimeError("MCP_SERVER_URL is required when MCP_TRANSPORT=http.")
         if self.max_steps <= 0:

@@ -86,10 +86,8 @@ class FakeAgent(Agent):
 
 @pytest.fixture
 def client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
-    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-test-xxx")
     monkeypatch.setenv("DRIVE_ROOT_FOLDER_ID", "test-folder")
 
-    # Patch the SessionStore.create to return a fake-backed session.
     from web import session_store as ss_module
 
     async def fake_create(self, title: str | None = None):
@@ -127,7 +125,7 @@ def test_config_endpoint(client: TestClient) -> None:
     res = client.get("/api/config")
     assert res.status_code == 200
     data = res.json()
-    assert data["openrouter_configured"] is True
+    assert "ollama_reachable" in data
     assert "default_model" in data
     assert "mcp_transport" in data
 

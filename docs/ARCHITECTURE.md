@@ -3,7 +3,7 @@
 ## Components
 
 ```
-  user channels (WhatsApp / Telegram / Slack / CLI …)
+  user channels (Web UI / CLI / Scheduler …)
                             |
                             v
                 +-------------------------+
@@ -13,7 +13,7 @@
                             | (A) OpenAI-compatible tool-calling
                             v
                 +-----------------------+
-                |  OpenRouter (LLM)     |
+                |  Ollama (local LLM)   |  ← 100% free, no data leaves host
                 +-----------------------+
                             ^
                             |   (B) tool calls come back as function_call deltas
@@ -45,12 +45,13 @@ demos. The trust model below applies equally to both deployments.
    orchestrator does not execute shell commands or eval strings from the
    model — the only effect it has on the outside world is MCP tool calls,
    each of which is declaratively typed.
-2. **Orchestrator ↔ LLM (OpenRouter).** The LLM is treated as adversarial:
+2. **Orchestrator ↔ LLM (Ollama).** The LLM is treated as adversarial:
    it may emit malformed tool arguments, try to call tools that don't exist,
    or request files outside the sandbox. All three are handled:
    invalid JSON degrades to `{}` (see `agent.py`); unknown tools produce an
    MCP error that is fed back to the model; out-of-sandbox reads raise
    `DriveError` and are reported to the LLM as a tool error.
+   Because Ollama runs locally, prompts and responses never leave the host.
 3. **Orchestrator ↔ MCP server.** Over stdio, the trust boundary is the
    process boundary. Over HTTP, use a bearer token (`MCP_SERVER_TOKEN`) and
    TLS. Only the MCP server holds Google credentials.
@@ -62,7 +63,8 @@ demos. The trust model below applies equally to both deployments.
 | Threat | Mitigation |
 | --- | --- |
 | Prompt injection tricks the LLM into exfiltrating files | Sandbox + MIME allow-list + byte cap + audit log. Even a fully-compromised prompt cannot reach files outside `DRIVE_ROOT_FOLDER_ID`. |
-| LLM loops on tool calls | `AGENT_MAX_STEPS` and `OPENROUTER_MAX_COST_USD`. |
+| LLM loops on tool calls | `AGENT_MAX_STEPS` hard cap. |
+| LLM data exfiltration | Ollama is local — prompts/responses never leave the machine. |
 | OAuth token leak | No OAuth tokens in the orchestrator. Service-account key stays on the MCP host; in Docker it's mounted read-only. |
 | Large file exhausts memory | `DRIVE_MAX_READ_BYTES` aborts downloads mid-stream. |
 | Path traversal on upload | `save_file` rejects names containing `/`; writes happen via API, not filesystem. |
@@ -92,10 +94,16 @@ export MCP_SERVER_TOKEN=<bearer>
 ./scripts/register-openclaw.sh --remote
 ```
 
-OpenClaw registers the server as `{"transport": "streamable-http", "url": ..., "headers": {...}}`
-(see `openclaw mcp set`). On the Gandi side, run `python -m mcp_drive_server`
-behind a reverse-proxy terminating TLS; switch the entry point to FastMCP's
-HTTP transport when exposing publicly.
+### Docker Compose (recommended)
+
+Ollama runs as a container alongside the MCP server and web UI.
+Pull the model once, then everything is self-contained:
+
+```bash
+docker compose up -d ollama
+docker compose exec ollama ollama pull qwen2.5:7b
+docker compose up -d
+```
 
 ## Extensibility
 
@@ -113,6 +121,3 @@ Adding a new MCP server (Slack, Notion, a CRM) means:
   later iteration with a vector store.
 - **Multi-user.** Single-tenant by design; a per-user ACL layer in the MCP
   server is the right place to add this.
-- **Automatic model selection.** We route to `OPENROUTER_DEFAULT_MODEL` for
-  now. Dynamic routing (cheap model for search, strong model for synthesis)
-  is straightforward to add on top of `OpenRouterClient.chat(model=...)`.

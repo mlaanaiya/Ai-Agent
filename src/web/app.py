@@ -60,16 +60,14 @@ def create_app(settings: OrchestratorSettings | None = None) -> FastAPI:
         return templates.TemplateResponse(
             request,
             "index.html",
-            {"default_model": settings.openrouter_default_model},
+            {"default_model": settings.ollama_default_model},
         )
 
     @app.get("/api/config", response_model=ConfigStatus)
     async def get_config() -> ConfigStatus:
         sa_path = Path("./secrets/service_account.json")
-        has_or_key = bool(settings.openrouter_api_key and settings.openrouter_api_key != "test-key")
         has_drive = False
         audit_path = "./audit/mcp-drive.jsonl"
-        # Peek at the Drive server settings without requiring them to be valid.
         try:
             from mcp_drive_server.config import DriveServerSettings
 
@@ -80,15 +78,15 @@ def create_app(settings: OrchestratorSettings | None = None) -> FastAPI:
         except Exception:  # noqa: BLE001
             pass
         sa_present = Path(sa_path).exists()
+        ollama_ok = await _check_ollama(settings.ollama_base_url)
         return ConfigStatus(
-            openrouter_configured=has_or_key,
+            ollama_reachable=ollama_ok,
             drive_folder_configured=has_drive,
             service_account_present=sa_present,
             mcp_transport=settings.mcp_transport,
-            default_model=settings.openrouter_default_model,
-            max_cost_usd=settings.openrouter_max_cost_usd,
+            default_model=settings.ollama_default_model,
             audit_log_path=str(audit_path),
-            ready=has_or_key and (has_drive or settings.mcp_transport == "http"),
+            ready=ollama_ok and (has_drive or settings.mcp_transport == "http"),
         )
 
     @app.get("/api/tools", response_model=list[ToolInfo])
@@ -233,6 +231,19 @@ def create_app(settings: OrchestratorSettings | None = None) -> FastAPI:
         }
 
     return app
+
+
+async def _check_ollama(base_url: str) -> bool:
+    """Quick health check: can we reach Ollama?"""
+    import httpx as _httpx
+
+    url = base_url.rstrip("/").replace("/v1", "")
+    try:
+        async with _httpx.AsyncClient(timeout=3.0) as client:
+            resp = await client.get(url)
+            return resp.status_code < 500
+    except Exception:  # noqa: BLE001
+        return False
 
 
 def _audit_path() -> Path:

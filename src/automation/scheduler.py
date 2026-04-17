@@ -19,7 +19,7 @@ from typing import Any
 from orchestrator.agent import Agent, AgentResult
 from orchestrator.config import OrchestratorSettings
 from orchestrator.mcp_client import MCPGateway
-from orchestrator.openrouter import OpenRouterClient
+from orchestrator.ollama import OllamaClient
 
 logger = logging.getLogger(__name__)
 
@@ -116,13 +116,10 @@ class Scheduler:
     async def run_once(self, job: JobDefinition) -> JobRun:
         """Execute a single job and return the run record."""
         started = datetime.now(timezone.utc).isoformat(timespec="seconds")
-        llm = OpenRouterClient(
-            api_key=self._settings.openrouter_api_key,
-            base_url=self._settings.openrouter_base_url,
-            default_model=self._settings.openrouter_default_model,
-            app_url=self._settings.openrouter_app_url,
-            app_name=self._settings.openrouter_app_name,
-            max_cost_usd=self._settings.openrouter_max_cost_usd,
+        llm = OllamaClient(
+            base_url=self._settings.ollama_base_url,
+            default_model=self._settings.ollama_default_model,
+            timeout=self._settings.ollama_timeout,
         )
         mcp: MCPGateway | None = None
         try:

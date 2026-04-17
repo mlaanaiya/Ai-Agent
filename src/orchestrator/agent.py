@@ -2,11 +2,11 @@
 
 A single `run` call:
   1. Adds the user's prompt to memory.
-  2. Calls OpenRouter with the MCP-discovered tools.
+  2. Calls the LLM (Ollama) with the MCP-discovered tools.
   3. If the model requests tool calls, executes them via the MCP gateway,
      appends the results, and loops.
-  4. Stops when the model returns a final assistant message (no tool_calls),
-     when `max_steps` is hit, or when the cost budget is exceeded.
+  4. Stops when the model returns a final assistant message (no tool_calls)
+     or when `max_steps` is hit.
 """
 
 from __future__ import annotations
@@ -19,7 +19,7 @@ from typing import Any
 
 from .mcp_client import MCPGateway
 from .memory import ConversationMemory
-from .openrouter import BudgetExceededError, OpenRouterClient
+from .ollama import OllamaClient
 
 logger = logging.getLogger(__name__)
 
@@ -46,7 +46,7 @@ class AgentResult:
 class Agent:
     def __init__(
         self,
-        llm: OpenRouterClient,
+        llm: OllamaClient,
         mcp: MCPGateway,
         system_prompt: str,
         *,
@@ -102,20 +102,11 @@ class Agent:
 
         for step in range(1, self._max_steps + 1):
             yield {"type": "llm_start", "step": step}
-            try:
-                response = await self._llm.chat(
-                    messages=self._memory.snapshot(),
-                    model=self._model,
-                    tools=tools or None,
-                )
-            except BudgetExceededError as exc:
-                yield {
-                    "type": "final",
-                    "text": f"Budget exceeded: {exc}",
-                    "stopped_reason": f"budget_exceeded: {exc}",
-                    "total_cost_usd": total_cost,
-                }
-                return
+            response = await self._llm.chat(
+                messages=self._memory.snapshot(),
+                model=self._model,
+                tools=tools or None,
+            )
 
             message = response.message
             self._memory.add_assistant(message)

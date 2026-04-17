@@ -19,7 +19,7 @@ from rich.table import Table
 from .agent import Agent
 from .config import OrchestratorSettings
 from .mcp_client import MCPGateway
-from .openrouter import OpenRouterClient
+from .ollama import OllamaClient
 
 app = typer.Typer(
     add_completion=False,
@@ -40,6 +40,14 @@ async def _build_gateway(settings: OrchestratorSettings) -> MCPGateway:
     return await MCPGateway.connect_stdio()
 
 
+def _build_llm(settings: OrchestratorSettings) -> OllamaClient:
+    return OllamaClient(
+        base_url=settings.ollama_base_url,
+        default_model=settings.ollama_default_model,
+        timeout=settings.ollama_timeout,
+    )
+
+
 def _setup_logging(level: str) -> None:
     logging.basicConfig(
         level=level.upper(),
@@ -50,7 +58,7 @@ def _setup_logging(level: str) -> None:
 @app.command()
 def ask(
     prompt: str = typer.Argument(..., help="User request."),
-    model: Optional[str] = typer.Option(None, help="Override OpenRouter model."),
+    model: Optional[str] = typer.Option(None, help="Override Ollama model."),
 ) -> None:
     """Run a single request and print the final answer."""
     settings = OrchestratorSettings()
@@ -60,14 +68,7 @@ def ask(
 
 
 async def _ask(settings: OrchestratorSettings, prompt: str, model: str | None) -> None:
-    async with OpenRouterClient(
-        api_key=settings.openrouter_api_key,
-        base_url=settings.openrouter_base_url,
-        default_model=settings.openrouter_default_model,
-        app_url=settings.openrouter_app_url,
-        app_name=settings.openrouter_app_name,
-        max_cost_usd=settings.openrouter_max_cost_usd,
-    ) as llm:
+    async with _build_llm(settings) as llm:
         async with await _build_gateway(settings) as mcp:
             agent = Agent(
                 llm=llm,
@@ -79,13 +80,13 @@ async def _ask(settings: OrchestratorSettings, prompt: str, model: str | None) -
             result = await agent.run(prompt)
             console.print(Panel(result.final_text or "(empty)", title="Answer"))
             console.print(
-                f"[dim]steps={len(result.steps)} cost=${result.total_cost_usd:.4f} "
+                f"[dim]steps={len(result.steps)} "
                 f"stopped={result.stopped_reason}[/dim]"
             )
 
 
 @app.command()
-def chat(model: Optional[str] = typer.Option(None, help="Override OpenRouter model.")) -> None:
+def chat(model: Optional[str] = typer.Option(None, help="Override Ollama model.")) -> None:
     """Interactive REPL (memory persists within the session)."""
     settings = OrchestratorSettings()
     settings.ensure_valid()
@@ -94,14 +95,7 @@ def chat(model: Optional[str] = typer.Option(None, help="Override OpenRouter mod
 
 
 async def _chat(settings: OrchestratorSettings, model: str | None) -> None:
-    async with OpenRouterClient(
-        api_key=settings.openrouter_api_key,
-        base_url=settings.openrouter_base_url,
-        default_model=settings.openrouter_default_model,
-        app_url=settings.openrouter_app_url,
-        app_name=settings.openrouter_app_name,
-        max_cost_usd=settings.openrouter_max_cost_usd,
-    ) as llm:
+    async with _build_llm(settings) as llm:
         async with await _build_gateway(settings) as mcp:
             agent = Agent(
                 llm=llm,
@@ -127,10 +121,7 @@ async def _chat(settings: OrchestratorSettings, model: str | None) -> None:
                     continue
                 result = await agent.run(prompt)
                 console.print(Panel(result.final_text or "(empty)", title="agent"))
-                console.print(
-                    f"[dim]cost=${result.total_cost_usd:.4f} "
-                    f"(session total ${llm.cumulative_cost:.4f})[/dim]"
-                )
+                console.print(f"[dim]steps={len(result.steps)}[/dim]")
 
 
 @app.command()
