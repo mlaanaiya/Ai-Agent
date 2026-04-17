@@ -68,9 +68,10 @@ export DRIVE_ROOT_FOLDER_ID=1AbC...xyz
 #        "Résume le compte-rendu Q3 du dossier Stratégie."
 ```
 
-## Quickstart — fallback runner (no OpenClaw)
+## Quickstart — Web UI (recommended for interactive use)
 
-Useful for CI, demos, or if OpenClaw isn't installed yet.
+The project ships a full-featured web interface (dark theme, live streaming,
+tool call cards, audit panel, multi-session). No separate build step.
 
 ```bash
 python -m venv .venv && source .venv/bin/activate
@@ -78,10 +79,76 @@ pip install -e '.[dev]'
 cp .env.example .env    # fill OPENROUTER_API_KEY and DRIVE_ROOT_FOLDER_ID
 # Place the service account JSON at ./secrets/service_account.json
 
+# Launch the web UI:
+ai-agent-web                              # → http://127.0.0.1:8000
+# Or with a custom bind:
+HOST=0.0.0.0 PORT=8080 ai-agent-web
+```
+
+**Features**:
+- Dark-themed single-page app (Tailwind + vanilla JS, zero build step).
+- Server-Sent Events streaming: see tool calls, arguments, and results
+  appear live as the agent works.
+- Multi-session sidebar with per-session memory and cost tracking.
+- Right panel showing MCP tools discovered from the gateway + live audit
+  log refresh.
+- Suggested prompts for quick-start.
+- Config status indicator (API key / Drive / service account health check).
+
+## Quickstart — Telegram bot
+
+```bash
+# 1. Create a bot via @BotFather on Telegram → copy the token
+export TELEGRAM_BOT_TOKEN=<token>
+
+# 2. Launch (uses the same .env for OpenRouter + Drive)
+ai-agent-telegram
+```
+
+The bot provides per-chat sessions with persistent memory. Tool calls are
+shown as inline status updates that get edited in real-time. Commands:
+`/start`, `/reset`, `/tools`, `/cost`.
+
+## Quickstart — automation (scheduled prompts)
+
+```bash
+cp config/jobs.example.json config/jobs.json   # customise prompts + schedules
+ai-agent-scheduler                             # daemon — runs jobs on schedule
+ai-agent-scheduler --run-once daily-summary    # run a single job then exit
+```
+
+Or via the web UI webhook (`POST /api/webhook`):
+
+```bash
+curl -X POST http://localhost:8000/api/webhook \
+     -H "Content-Type: application/json" \
+     -d '{"prompt": "List files in the sandbox."}'
+```
+
+## Quickstart — CLI fallback (no browser needed)
+
+```bash
 ai-agent tools                             # list MCP tools
 ai-agent ask "Summarise the Q3 notes."     # one-shot
 ai-agent chat                              # interactive REPL
 ```
+
+## MCP tools (9 total)
+
+| Tool | Description |
+|---|---|
+| `list_files` | Enumerate files in a folder (default: sandbox root) |
+| `search_drive` | Search by name across the sandbox (up to 3 levels deep) |
+| `read_document` | Read the text content of a document (Docs/Sheets exported as text/CSV) |
+| `save_file` | Create a new text file in the sandbox |
+| `create_folder` | Create a subfolder |
+| `get_metadata` | Get full file metadata (name, size, web link, description…) |
+| `move_file` | Move a file to a different folder within the sandbox |
+| `rename_file` | Rename a file |
+| `delete_file` | Permanently delete a file (cannot delete the root) |
+
+All tools enforce the folder sandbox, MIME allow-list, byte cap, and audit
+logging. See `src/mcp_drive_server/server.py` for the full schema.
 
 ## Repository layout
 
@@ -94,13 +161,19 @@ src/
     config.py                 # pydantic settings
   orchestrator/               # fallback runner, only used without OpenClaw
     agent.py, openrouter.py, mcp_client.py, memory.py, cli.py
+  web/                        # FastAPI web interface (dark theme, SSE streaming)
+    app.py, session_store.py, schemas.py, templates/, static/
+  telegram_bot/               # Telegram integration (per-chat sessions)
+  automation/                 # Scheduled prompt runner + webhook trigger
+    scheduler.py              # cron-like loop, job definitions, history
 config/
   SOUL.md                     # OpenClaw personality (document analyst)
   AGENTS.md                   # OpenClaw operating rules
   openclaw.config.json5       # OpenClaw config snippet
+  jobs.example.json           # sample scheduled jobs
 scripts/
   register-openclaw.sh        # idempotent `openclaw mcp set` wrapper
-tests/                        # 20 hermetic tests (no net, no creds)
+tests/                        # 42 hermetic tests (no net, no creds)
 docs/ARCHITECTURE.md
 Dockerfile
 docker-compose.yml
@@ -146,7 +219,10 @@ All 20 tests are offline (mocked HTTP, in-memory MCP transport, fake Drive)
 ```bash
 docker compose build
 docker compose up -d mcp-drive        # daemonise the MCP gateway (prod path)
-docker compose run --rm orchestrator chat   # fallback runner, for dev/demo
+docker compose up -d web              # web UI at http://localhost:8000
+docker compose up -d telegram         # Telegram bot
+docker compose up -d scheduler        # automated prompt runner
+docker compose run --rm orchestrator chat   # CLI fallback, for dev/demo
 ```
 
 On a Gandi VPS, run only the `mcp-drive` service, expose the streamable

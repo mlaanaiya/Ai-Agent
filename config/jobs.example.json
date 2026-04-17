@@ -1,0 +1,25 @@
+{
+  "jobs": [
+    {
+      "name": "daily-summary",
+      "prompt": "List all files modified in the last 24 hours in the sandbox and produce a brief summary of each.",
+      "cron": "daily",
+      "save_result": true,
+      "enabled": true
+    },
+    {
+      "name": "weekly-report",
+      "prompt": "Produce a one-page markdown report listing all documents in the sandbox, grouped by subfolder, with file sizes and last-modified dates. Save it as rapport-hebdo.md.",
+      "cron": "weekly",
+      "save_result": true,
+      "enabled": true
+    },
+    {
+      "name": "health-check",
+      "prompt": "List the files in the sandbox root. Confirm the Drive connection is working. Reply with OK or describe any errors.",
+      "cron": "1h",
+      "save_result": false,
+      "enabled": true
+    }
+  ]
+}

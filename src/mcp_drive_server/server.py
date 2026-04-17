@@ -158,4 +158,71 @@ def build_server(
             ).to_dict(),
         )
 
+    @app.tool(
+        name="create_folder",
+        description=(
+            "Create a new subfolder inside the sandbox (or a specific parent folder). "
+            "Returns the new folder's id/name."
+        ),
+    )
+    def create_folder(name: str, parent_id: str | None = None) -> dict[str, Any]:
+        return _run_tool(
+            "create_folder",
+            {"name": name, "parent_id": parent_id},
+            lambda: drive.create_folder(name=name, parent_id=parent_id).to_dict(),
+        )
+
+    @app.tool(
+        name="get_metadata",
+        description=(
+            "Get full metadata for a file: id, name, mime_type, size, modified_time, "
+            "parents, web_link, description. Does NOT read the file contents."
+        ),
+    )
+    def get_metadata(file_id: str) -> dict[str, Any]:
+        return _run_tool(
+            "get_metadata",
+            {"file_id": file_id},
+            lambda: drive.get_metadata(file_id),
+        )
+
+    @app.tool(
+        name="move_file",
+        description=(
+            "Move a file to a different folder within the sandbox. "
+            "Both the file and the destination must be inside the sandbox."
+        ),
+    )
+    def move_file(file_id: str, new_parent_id: str) -> dict[str, Any]:
+        return _run_tool(
+            "move_file",
+            {"file_id": file_id, "new_parent_id": new_parent_id},
+            lambda: drive.move_file(file_id=file_id, new_parent_id=new_parent_id).to_dict(),
+        )
+
+    @app.tool(
+        name="rename_file",
+        description="Rename a file inside the sandbox.",
+    )
+    def rename_file(file_id: str, new_name: str) -> dict[str, Any]:
+        return _run_tool(
+            "rename_file",
+            {"file_id": file_id, "new_name": new_name},
+            lambda: drive.rename_file(file_id=file_id, new_name=new_name).to_dict(),
+        )
+
+    @app.tool(
+        name="delete_file",
+        description=(
+            "Permanently delete a file inside the sandbox. "
+            "Cannot delete the sandbox root. Use with caution."
+        ),
+    )
+    def delete_file(file_id: str) -> dict[str, Any]:
+        return _run_tool(
+            "delete_file",
+            {"file_id": file_id},
+            lambda: drive.delete_file(file_id),
+        )
+
     return app
