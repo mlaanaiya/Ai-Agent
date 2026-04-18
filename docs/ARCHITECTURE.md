@@ -12,13 +12,18 @@
                 +-----------+-------------+
                             | (A) OpenAI-compatible tool-calling
                             v
-                +-----------------------+
-                |  Ollama (local LLM)   |  ← 100% free, no data leaves host
-                +-----------------------+
-                            ^
-                            |   (B) tool calls come back as function_call deltas
-                            |
-                            v
+        +-------------------------------------+
+        |         build_llm() factory         |
+        |  LLM_BACKEND=gemini | ollama        |
+        +--------+-----------------+----------+
+                 |                 |
+                 v                 v
+  +--------------------+  +-------------------+
+  | Gemini 2.0 Flash   |  |  Ollama (local)   |
+  | (free tier, cloud)  |  |  (on-host, free)  |
+  +--------------------+  +-------------------+
+                 \                /
+                  v              v
                 +-----------------------+
                 |    MCP Drive Gateway  |          audit log (JSONL)
                 |    (this repo)        +-------> ./audit/mcp-drive.jsonl
@@ -45,13 +50,15 @@ demos. The trust model below applies equally to both deployments.
    orchestrator does not execute shell commands or eval strings from the
    model — the only effect it has on the outside world is MCP tool calls,
    each of which is declaratively typed.
-2. **Orchestrator ↔ LLM (Ollama).** The LLM is treated as adversarial:
-   it may emit malformed tool arguments, try to call tools that don't exist,
-   or request files outside the sandbox. All three are handled:
-   invalid JSON degrades to `{}` (see `agent.py`); unknown tools produce an
-   MCP error that is fed back to the model; out-of-sandbox reads raise
-   `DriveError` and are reported to the LLM as a tool error.
-   Because Ollama runs locally, prompts and responses never leave the host.
+2. **Orchestrator ↔ LLM (Gemini / Ollama).** The LLM is treated as
+   adversarial: it may emit malformed tool arguments, try to call tools
+   that don't exist, or request files outside the sandbox. All three are
+   handled: invalid JSON degrades to `{}` (see `agent.py`); unknown tools
+   produce an MCP error that is fed back to the model; out-of-sandbox
+   reads raise `DriveError` and are reported to the LLM as a tool error.
+   Both backends use the same OpenAI-compatible chat/completions format.
+   With Ollama, prompts never leave the host. With Gemini, prompts go to
+   Google's API but no Google Drive credentials are exposed.
 3. **Orchestrator ↔ MCP server.** Over stdio, the trust boundary is the
    process boundary. Over HTTP, use a bearer token (`MCP_SERVER_TOKEN`) and
    TLS. Only the MCP server holds Google credentials.
@@ -64,7 +71,7 @@ demos. The trust model below applies equally to both deployments.
 | --- | --- |
 | Prompt injection tricks the LLM into exfiltrating files | Sandbox + MIME allow-list + byte cap + audit log. Even a fully-compromised prompt cannot reach files outside `DRIVE_ROOT_FOLDER_ID`. |
 | LLM loops on tool calls | `AGENT_MAX_STEPS` hard cap. |
-| LLM data exfiltration | Ollama is local — prompts/responses never leave the machine. |
+| LLM data exfiltration | Ollama: fully local. Gemini: prompts go to Google API, but no Drive credentials or service-account keys are included. Set `LLM_BACKEND=ollama` for air-gapped operation. |
 | OAuth token leak | No OAuth tokens in the orchestrator. Service-account key stays on the MCP host; in Docker it's mounted read-only. |
 | Large file exhausts memory | `DRIVE_MAX_READ_BYTES` aborts downloads mid-stream. |
 | Path traversal on upload | `save_file` rejects names containing `/`; writes happen via API, not filesystem. |
