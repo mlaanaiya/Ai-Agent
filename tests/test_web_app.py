@@ -181,3 +181,107 @@ def test_audit_endpoint_handles_missing_file(
     res = client.get("/api/audit")
     assert res.status_code == 200
     assert res.json() == []
+
+
+# ---- Quick-log endpoints ---------------------------------------------------
+
+
+@pytest.fixture
+def quicklog_client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
+    """Same as `client` but also sets QUICKLOG_TOKEN."""
+    monkeypatch.setenv("DRIVE_ROOT_FOLDER_ID", "test-folder")
+    monkeypatch.setenv("QUICKLOG_TOKEN", "secret-token")
+
+    from web import session_store as ss_module
+
+    async def fake_create(self, title: str | None = None):
+        import uuid
+        from datetime import datetime, timezone
+        llm = FakeLLM()
+        mcp = FakeMCP()
+        agent = FakeAgent(llm=llm, mcp=mcp, system_prompt="sys", max_steps=4)  # type: ignore[arg-type]
+        entry = ss_module.SessionEntry(
+            id=uuid.uuid4().hex[:12],
+            title=title or f"Session {len(self._sessions) + 1}",
+            created_at=datetime.now(timezone.utc),
+            llm=llm,  # type: ignore[arg-type]
+            mcp=mcp,  # type: ignore[arg-type]
+            agent=agent,
+        )
+        self._sessions[entry.id] = entry
+        return entry
+
+    monkeypatch.setattr(ss_module.SessionStore, "create", fake_create)
+    settings = OrchestratorSettings()
+    app = create_app(settings)
+    return TestClient(app)
+
+
+def test_quicklog_requires_token(quicklog_client: TestClient) -> None:
+    res = quicklog_client.post("/api/quicklog/med", json={"slot": "morning"})
+    assert res.status_code == 401
+
+
+def test_quicklog_med_accepts_valid_token(quicklog_client: TestClient) -> None:
+    res = quicklog_client.post(
+        "/api/quicklog/med",
+        json={"slot": "morning", "note": "tacrolimus"},
+        headers={"x-quicklog-token": "secret-token"},
+    )
+    assert res.status_code == 200
+    assert res.json()["status"] == "completed"
+
+
+def test_quicklog_vitals_validates_type(quicklog_client: TestClient) -> None:
+    res = quicklog_client.post(
+        "/api/quicklog/vitals",
+        json={"type": "invalid", "value": 1},
+        headers={"x-quicklog-token": "secret-token"},
+    )
+    assert res.status_code == 422
+
+
+def test_quicklog_expense_requires_amount(quicklog_client: TestClient) -> None:
+    res = quicklog_client.post(
+        "/api/quicklog/expense",
+        json={"merchant": "Carrefour"},
+        headers={"x-quicklog-token": "secret-token"},
+    )
+    assert res.status_code == 422
+
+
+def test_quicklog_expense_success(quicklog_client: TestClient) -> None:
+    res = quicklog_client.post(
+        "/api/quicklog/expense",
+        json={"amount": 12.50, "merchant": "Carrefour", "category": "groceries"},
+        headers={"x-quicklog-token": "secret-token"},
+    )
+    assert res.status_code == 200
+
+
+def test_quicklog_todo_requires_text(quicklog_client: TestClient) -> None:
+    res = quicklog_client.post(
+        "/api/quicklog/todo",
+        json={},
+        headers={"x-quicklog-token": "secret-token"},
+    )
+    assert res.status_code == 422
+
+
+def test_quicklog_reading_requires_url(quicklog_client: TestClient) -> None:
+    res = quicklog_client.post(
+        "/api/quicklog/reading",
+        json={"title": "no url"},
+        headers={"x-quicklog-token": "secret-token"},
+    )
+    assert res.status_code == 422
+
+
+def test_quicklog_blocked_when_token_unset(client: TestClient) -> None:
+    """When QUICKLOG_TOKEN is empty the endpoint returns 503, not 401."""
+    res = client.post(
+        "/api/quicklog/med",
+        json={"slot": "morning"},
+        headers={"x-quicklog-token": "anything"},
+    )
+    assert res.status_code == 503

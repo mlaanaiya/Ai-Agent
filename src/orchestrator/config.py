@@ -49,6 +49,13 @@ class OrchestratorSettings(BaseSettings):
     max_steps: int = Field(default=8, alias="AGENT_MAX_STEPS")
     log_level: str = Field(default="INFO", alias="AGENT_LOG_LEVEL")
 
+    # Life Assistant
+    user_profile_file: Path = Field(
+        default=Path("./config/user-profile.json"),
+        alias="USER_PROFILE_FILE",
+    )
+    quicklog_token: str = Field(default="", alias="QUICKLOG_TOKEN")
+
     @property
     def active_model_name(self) -> str:
         if self.llm_backend == "gemini":

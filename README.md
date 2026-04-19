@@ -126,14 +126,18 @@ curl -X POST http://localhost:8000/api/webhook \
      -d '{"prompt": "List files in the sandbox."}'
 ```
 
-## MCP tools (9 total)
+## MCP tools (13 total)
 
 | Tool | Description |
 |---|---|
 | `list_files` | Enumerate files in a folder (default: sandbox root) |
+| `list_recent_files` | List recently-modified files (newest first) |
 | `search_drive` | Search by name across the sandbox (up to 3 levels deep) |
+| `find_file_by_name` | Exact-name lookup in one folder (returns null if missing) |
 | `read_document` | Read the text content of a document (Docs/Sheets exported as text/CSV) |
 | `save_file` | Create a new text file in the sandbox |
+| `append_to_file` | Append a line/row to an existing text/CSV/JSONL file (logs!) |
+| `overwrite_file` | Replace a file's entire content (snapshots/dashboards) |
 | `create_folder` | Create a subfolder |
 | `get_metadata` | Get full file metadata (name, size, web link, description…) |
 | `move_file` | Move a file to a different folder within the sandbox |
@@ -142,6 +146,25 @@ curl -X POST http://localhost:8000/api/webhook \
 
 All tools enforce the folder sandbox, MIME allow-list, byte cap, and audit
 logging. See `src/mcp_drive_server/server.py` for the full schema.
+
+## Life Assistant (16 ready-to-use features)
+
+This project is a complete Life Assistant — medications, labs, finances,
+subscriptions, savings goals, standups, learning, todos, morning briefings,
+and more. All 16 features are pre-configured scheduled prompts +
+quick-log endpoints for phone shortcuts.
+
+See [`docs/LIFE_ASSISTANT.md`](docs/LIFE_ASSISTANT.md) for the full guide.
+
+```bash
+# One-time setup:
+python scripts/setup_life_folders.py   # create Drive folders + seed files
+cp config/jobs.example.json config/jobs.json
+
+# Run:
+ai-agent-web         # web UI + HTTP endpoints
+ai-agent-scheduler   # runs the 16 jobs on schedule
+```
 
 ## Repository layout
 
@@ -165,8 +188,11 @@ config/
   jobs.example.json           # sample scheduled jobs
 scripts/
   register-openclaw.sh        # idempotent `openclaw mcp set` wrapper
-tests/                        # 43 hermetic tests (no net, no creds)
-docs/ARCHITECTURE.md
+  setup_life_folders.py       # one-shot folder structure + seed files
+tests/                        # 59 hermetic tests (no net, no creds)
+docs/
+  ARCHITECTURE.md
+  LIFE_ASSISTANT.md           # user guide — 16 features + quick-log endpoints
 Dockerfile
 docker-compose.yml
 ```
@@ -226,7 +252,7 @@ Set `LLM_BACKEND=ollama` in `.env` to use Ollama instead of Gemini.
 pytest -q
 ```
 
-All 43 tests are offline (mocked HTTP, in-memory MCP transport, fake Drive)
+All 59 tests are offline (mocked HTTP, in-memory MCP transport, fake Drive)
 — no API keys or network required.
 
 ## Prerequisites (everything is free)

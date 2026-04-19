@@ -1,24 +1,116 @@
 {
+  "_comment": "Life Assistant scheduled jobs. Copy to config/jobs.json and tune. All folder names are relative to the sandbox root created by scripts/setup_life_folders.py.",
   "jobs": [
     {
-      "name": "daily-summary",
-      "prompt": "List all files modified in the last 24 hours in the sandbox and produce a brief summary of each.",
+      "name": "morning-briefing",
+      "prompt": "Produce a short morning briefing (max 10 bullet points). Include: (1) today's date, (2) any pending todos from Life/Todos/todos.jsonl, (3) medications scheduled today from Health/Meds/meds-log.jsonl, (4) appointments or deadlines in the next 48h, (5) one piece of good news if you can find it in the recent files. Save the briefing as Life/Briefings/briefing-YYYY-MM-DD.md.",
       "cron": "daily",
       "save_result": true,
       "enabled": true
     },
     {
-      "name": "weekly-report",
-      "prompt": "Produce a one-page markdown report listing all documents in the sandbox, grouped by subfolder, with file sizes and last-modified dates. Save it as rapport-hebdo.md.",
+      "name": "med-reminder-morning",
+      "prompt": "It is the morning medication window. Append a pending-dose entry to Health/Meds/meds-log.jsonl with ISO timestamp, slot='morning', status='pending'. Summarise the last 7 days of adherence: how many morning doses were marked taken vs missed. If any morning dose from the last 3 days is still 'pending', flag it as potentially missed. Keep the reply under 5 lines.",
+      "cron": "daily",
+      "save_result": false,
+      "enabled": true
+    },
+    {
+      "name": "med-reminder-evening",
+      "prompt": "Evening medication window. Append a pending-dose entry to Health/Meds/meds-log.jsonl with slot='evening', status='pending'. Report the last 7-day evening-dose adherence (% taken). Under 5 lines.",
+      "cron": "daily",
+      "save_result": false,
+      "enabled": true
+    },
+    {
+      "name": "lab-results-parser",
+      "prompt": "Scan Health/Labs/ for files uploaded in the last 24 hours. For each new PDF or document, read it with read_document, extract lab values (creatinine, eGFR, tacrolimus level, potassium, hemoglobin, white blood cells — add others you find) as CSV rows of the form 'date,test,value,unit,reference_range,flag'. Append the rows to Health/Labs/lab-results.csv. Flag any out-of-range value. Reply with a one-paragraph summary and highlight abnormal values.",
+      "cron": "6h",
+      "save_result": false,
+      "enabled": true
+    },
+    {
+      "name": "appointment-prep",
+      "prompt": "Check Health/Appointments/ for any appointment scheduled in the next 48 hours (files with a date in the name, or a note in the description). If one is found, read Health/Labs/lab-results.csv (last 30 days), Health/Vitals/vitals-log.jsonl (last 14 days), and Health/Meds/meds-log.jsonl (last 14 days) and produce a 1-page prep note: recent lab trends, any flagged values, adherence summary, questions to ask the doctor. Save as Health/Appointments/prep-YYYY-MM-DD.md. If no appointment is pending, reply 'no appointment in the next 48h'.",
+      "cron": "daily",
+      "save_result": false,
+      "enabled": true
+    },
+    {
+      "name": "hydration-reminder",
+      "prompt": "Daily hydration check. Look at Health/Vitals/vitals-log.jsonl for today's water entries. If total water logged today is under 1500 ml, suggest drinking more and list the times/amounts already recorded. Under 3 lines. No save.",
+      "cron": "4h",
+      "save_result": false,
+      "enabled": false
+    },
+    {
+      "name": "bank-statement-parser",
+      "prompt": "Scan Money/Statements/ for files uploaded in the last 24 hours. For each new statement, read it, extract each transaction (date, amount, currency, merchant, suggested category from: groceries, dining, transport, utilities, subscriptions, health, entertainment, income, other). Append rows to Money/Expenses/expenses.csv. Move the processed statement into Money/Statements/Processed/ (create the folder if needed). Reply with: total in/out, top 5 expenses, category breakdown.",
+      "cron": "12h",
+      "save_result": false,
+      "enabled": true
+    },
+    {
+      "name": "budget-alerts",
+      "prompt": "Read Money/Budgets/budget.json and Money/Expenses/expenses.csv. For the current month, compute the spend per category and compare to budget. If any category is over 80% with more than 5 days left in the month, flag it. Under 6 lines. If all categories are healthy, reply 'all categories under budget'.",
+      "cron": "daily",
+      "save_result": false,
+      "enabled": true
+    },
+    {
+      "name": "subscription-auditor",
+      "prompt": "Read Money/Expenses/expenses.csv over the last 90 days. Detect recurring charges (same merchant, similar amount, >=2 months in a row). Update Money/Subscriptions/subscriptions.csv with merchant, amount, cadence, last_seen, status (active/dormant). Flag any 'dormant' subscription (not seen in the last 45 days but still billed before that) as potentially unused. Produce a summary with total monthly subscription cost.",
       "cron": "weekly",
       "save_result": true,
       "enabled": true
     },
     {
-      "name": "health-check",
-      "prompt": "List the files in the sandbox root. Confirm the Drive connection is working. Reply with OK or describe any errors.",
-      "cron": "1h",
+      "name": "savings-goals-progress",
+      "prompt": "Read Money/Goals/savings-goals.json and Money/Expenses/expenses.csv. For each goal, estimate progress based on net savings this month (income minus expenses in all non-'income' categories). Update the 'current' field in savings-goals.json using overwrite_file. Produce a one-paragraph encouragement message.",
+      "cron": "weekly",
       "save_result": false,
+      "enabled": true
+    },
+    {
+      "name": "daily-standup-generator",
+      "prompt": "Look in Dev/Standups/ for a file named standup-notes-YYYY-MM-DD.md for today. If it exists, summarise it into 3 bullets: yesterday, today, blockers. If not, look at the last standup file and produce a short 'what might you want to continue' hint. Save the summary to Dev/Standups/standup-YYYY-MM-DD.md. Keep it under 6 lines.",
+      "cron": "daily",
+      "save_result": false,
+      "enabled": true
+    },
+    {
+      "name": "learning-digest",
+      "prompt": "Read Dev/Learning/reading-list.jsonl. Identify entries from the last 7 days where status is 'to-read'. Produce a short digest recommending which 3 to start with based on title/tag. Reply in under 10 lines.",
+      "cron": "weekly",
+      "save_result": true,
+      "enabled": true
+    },
+    {
+      "name": "meeting-notes-organizer",
+      "prompt": "List files in Life/Notes/ modified in the last 24 hours whose name starts with 'raw-'. For each one, read it, extract action items and decisions, and save a cleaned version as 'organized-<same suffix>' in the same folder. Reply with the count of files processed.",
+      "cron": "daily",
+      "save_result": false,
+      "enabled": true
+    },
+    {
+      "name": "task-extractor",
+      "prompt": "Scan files modified in the last 24 hours across Life/Notes/ and Life/Briefings/. Extract any line that looks like a commitment or TODO (e.g. 'I will X', 'need to X', '- [ ] X'). Append each as a JSONL entry to Life/Todos/todos.jsonl with fields: {created, source_file, text, status='pending'}. Skip duplicates (same text already present). Reply with the number of new todos added.",
+      "cron": "daily",
+      "save_result": false,
+      "enabled": true
+    },
+    {
+      "name": "weekly-health-report",
+      "prompt": "Produce a weekly health summary: adherence rate for meds (Health/Meds/meds-log.jsonl), lab trends (Health/Labs/lab-results.csv), average BP/weight (Health/Vitals/vitals-log.jsonl). Under 1 page, markdown. Save as Reports/health-week-YYYY-WW.md.",
+      "cron": "weekly",
+      "save_result": true,
+      "enabled": true
+    },
+    {
+      "name": "weekly-money-report",
+      "prompt": "Produce a weekly money summary: total spend, top 5 categories, subscription delta (new/dormant), progress toward savings goals. Under 1 page, markdown. Save as Reports/money-week-YYYY-WW.md.",
+      "cron": "weekly",
+      "save_result": true,
       "enabled": true
     }
   ]

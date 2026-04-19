@@ -225,4 +225,81 @@ def build_server(
             lambda: drive.delete_file(file_id),
         )
 
+    @app.tool(
+        name="append_to_file",
+        description=(
+            "Append text to an existing plain-text/CSV/JSONL file. "
+            "Use this to log entries (med doses, BP readings, expenses) "
+            "into a rolling log without rewriting the whole file. "
+            "Fails on native Google Docs/Sheets — use those only for "
+            "human-edited documents."
+        ),
+    )
+    def append_to_file(
+        file_id: str, content: str, separator: str = "\n"
+    ) -> dict[str, Any]:
+        return _run_tool(
+            "append_to_file",
+            {"file_id": file_id, "content_length": len(content)},
+            lambda: drive.append_to_file(
+                file_id=file_id, content=content, separator=separator
+            ).to_dict(),
+        )
+
+    @app.tool(
+        name="find_file_by_name",
+        description=(
+            "Find a file by exact name in a specific folder (or sandbox root). "
+            "Returns {id, name, ...} if found, or null. Useful for "
+            "idempotent 'open or create' flows — call this, then save_file "
+            "if null or append_to_file if found."
+        ),
+    )
+    def find_file_by_name(
+        name: str, parent_id: str | None = None
+    ) -> dict[str, Any] | None:
+        return _run_tool(
+            "find_file_by_name",
+            {"name": name, "parent_id": parent_id},
+            lambda: drive.find_file_by_name(name=name, parent_id=parent_id),
+        )
+
+    @app.tool(
+        name="list_recent_files",
+        description=(
+            "List the most recently modified files in the sandbox (or a "
+            "specific subtree), ordered newest first. Useful for morning "
+            "briefings and detecting new uploads (lab PDFs, bank statements, "
+            "receipts)."
+        ),
+    )
+    def list_recent_files(
+        max_results: int = 20, folder_id: str | None = None
+    ) -> list[dict[str, Any]]:
+        return _run_tool(
+            "list_recent_files",
+            {"max_results": max_results, "folder_id": folder_id},
+            lambda: [
+                f.to_dict()
+                for f in drive.list_recent_files(
+                    max_results=max_results, folder_id=folder_id
+                )
+            ],
+        )
+
+    @app.tool(
+        name="overwrite_file",
+        description=(
+            "Replace the entire content of an existing plain-text/CSV/JSONL "
+            "file (sandboxed, byte-capped). Use this for snapshot files like "
+            "rolling totals or dashboards, not for append-only logs."
+        ),
+    )
+    def overwrite_file(file_id: str, content: str) -> dict[str, Any]:
+        return _run_tool(
+            "overwrite_file",
+            {"file_id": file_id, "content_length": len(content)},
+            lambda: drive.overwrite_file(file_id=file_id, content=content).to_dict(),
+        )
+
     return app
