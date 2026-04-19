@@ -393,6 +393,185 @@ class DriveClient:
             raise DriveError(f"Drive delete failed: {exc}") from exc
         return {"id": file_id, "status": "deleted"}
 
+    def append_to_file(
+        self, file_id: str, content: str, separator: str = "\n"
+    ) -> DriveFile:
+        """Append text to an existing file in the sandbox.
+
+        Critical for logging (meds, BP, expenses). Reads the file, concatenates,
+        re-uploads. Enforces sandbox + byte cap on the final payload.
+        """
+        self._assert_in_sandbox(file_id)
+        try:
+            meta = (
+                self._svc.files()
+                .get(
+                    fileId=file_id,
+                    fields="id,name,mimeType,size",
+                    supportsAllDrives=True,
+                )
+                .execute()
+            )
+        except HttpError as exc:
+            raise DriveError(f"Drive metadata lookup failed: {exc}") from exc
+
+        mime = meta.get("mimeType", "text/plain")
+        if mime in GOOGLE_DOC_EXPORTS or mime.startswith(
+            "application/vnd.google-apps."
+        ):
+            raise DriveError(
+                f"append_to_file: native Google type '{mime}' not supported; "
+                "use a plain text/CSV/JSONL file instead."
+            )
+
+        buf = io.BytesIO()
+        try:
+            request = self._svc.files().get_media(
+                fileId=file_id, supportsAllDrives=True
+            )
+            downloader = MediaIoBaseDownload(buf, request, chunksize=256 * 1024)
+            done = False
+            while not done:
+                _, done = downloader.next_chunk()
+                if buf.tell() > self._max_bytes:
+                    raise DriveError(
+                        f"File already exceeds max_read_bytes ({self._max_bytes})."
+                    )
+        except HttpError as exc:
+            raise DriveError(f"Drive download failed: {exc}") from exc
+
+        existing = buf.getvalue().decode("utf-8", errors="replace")
+        sep = separator if existing and not existing.endswith(separator) else ""
+        new_content = existing + sep + content
+        if len(new_content.encode("utf-8")) > self._max_bytes:
+            raise DriveError(
+                f"Appended content would exceed max_read_bytes ({self._max_bytes})."
+            )
+
+        data = io.BytesIO(new_content.encode("utf-8"))
+        media = MediaIoBaseUpload(data, mimetype=mime, resumable=False)
+        try:
+            updated = (
+                self._svc.files()
+                .update(
+                    fileId=file_id,
+                    media_body=media,
+                    fields="id,name,mimeType,size,modifiedTime,parents",
+                    supportsAllDrives=True,
+                )
+                .execute()
+            )
+        except HttpError as exc:
+            raise DriveError(f"Drive update failed: {exc}") from exc
+        return _to_drive_file(updated)
+
+    def find_file_by_name(
+        self, name: str, parent_id: str | None = None
+    ) -> dict[str, Any] | None:
+        """Find a single file by exact name in a folder (or sandbox root).
+
+        Returns None if not found — useful for idempotent "create-or-append"
+        flows. Only searches one folder level (not recursive).
+        """
+        folder = parent_id or self._root
+        self._assert_in_sandbox(folder)
+        safe = name.replace("'", "\\'")
+        q = f"'{folder}' in parents and name = '{safe}' and trashed = false"
+        try:
+            resp = (
+                self._svc.files()
+                .list(
+                    q=q,
+                    pageSize=1,
+                    fields="files(id,name,mimeType,size,modifiedTime,parents)",
+                    supportsAllDrives=True,
+                    includeItemsFromAllDrives=True,
+                )
+                .execute()
+            )
+        except HttpError as exc:
+            raise DriveError(f"Drive lookup failed: {exc}") from exc
+        files = resp.get("files", [])
+        if not files:
+            return None
+        return _to_drive_file(files[0]).to_dict()
+
+    def list_recent_files(
+        self, max_results: int = 20, folder_id: str | None = None
+    ) -> list[DriveFile]:
+        """List recently modified files in the sandbox (or a specific subtree).
+
+        Useful for morning briefings ("what's new?") and monitoring uploads
+        (new lab PDFs, bank statements, receipts).
+        """
+        descendant_folders = (
+            [folder_id] if folder_id else self._collect_descendant_folders(self._root, max_depth=3)
+        )
+        if folder_id:
+            self._assert_in_sandbox(folder_id)
+        parent_clause = " or ".join(f"'{fid}' in parents" for fid in descendant_folders)
+        q = f"({parent_clause}) and trashed = false"
+        try:
+            resp = (
+                self._svc.files()
+                .list(
+                    q=q,
+                    pageSize=min(max_results, 100),
+                    orderBy="modifiedTime desc",
+                    fields="files(id,name,mimeType,size,modifiedTime,parents)",
+                    supportsAllDrives=True,
+                    includeItemsFromAllDrives=True,
+                )
+                .execute()
+            )
+        except HttpError as exc:
+            raise DriveError(f"Drive list failed: {exc}") from exc
+        return [_to_drive_file(f) for f in resp.get("files", [])]
+
+    def overwrite_file(self, file_id: str, content: str) -> DriveFile:
+        """Replace the entire content of an existing file (sandboxed, byte-capped).
+
+        Used when appending isn't semantic — e.g. snapshot sheets, summaries.
+        """
+        self._assert_in_sandbox(file_id)
+        try:
+            meta = (
+                self._svc.files()
+                .get(
+                    fileId=file_id,
+                    fields="id,name,mimeType",
+                    supportsAllDrives=True,
+                )
+                .execute()
+            )
+        except HttpError as exc:
+            raise DriveError(f"Drive metadata lookup failed: {exc}") from exc
+        mime = meta.get("mimeType", "text/plain")
+        if mime.startswith("application/vnd.google-apps."):
+            raise DriveError(
+                f"overwrite_file: native Google type '{mime}' not supported."
+            )
+        if len(content.encode("utf-8")) > self._max_bytes:
+            raise DriveError(
+                f"Content exceeds max_read_bytes ({self._max_bytes})."
+            )
+        data = io.BytesIO(content.encode("utf-8"))
+        media = MediaIoBaseUpload(data, mimetype=mime, resumable=False)
+        try:
+            updated = (
+                self._svc.files()
+                .update(
+                    fileId=file_id,
+                    media_body=media,
+                    fields="id,name,mimeType,size,modifiedTime,parents",
+                    supportsAllDrives=True,
+                )
+                .execute()
+            )
+        except HttpError as exc:
+            raise DriveError(f"Drive update failed: {exc}") from exc
+        return _to_drive_file(updated)
+
 
 def _to_drive_file(raw: dict[str, Any]) -> DriveFile:
     size_raw = raw.get("size")

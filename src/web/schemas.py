@@ -38,11 +38,11 @@ class AuditEntry(BaseModel):
 
 
 class ConfigStatus(BaseModel):
-    openrouter_configured: bool
+    llm_backend: str
+    llm_configured: bool
     drive_folder_configured: bool
     service_account_present: bool
     mcp_transport: str
     default_model: str
-    max_cost_usd: float
     audit_log_path: str
     ready: bool

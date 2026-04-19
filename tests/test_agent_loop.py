@@ -8,7 +8,7 @@ from typing import Any
 import pytest
 
 from orchestrator.agent import Agent
-from orchestrator.openrouter import ChatResponse, Usage
+from orchestrator.ollama import ChatResponse, Usage
 
 
 @dataclass

@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "ai-agent"
 version = "0.1.0"
-description = "Sovereign AI agent: OpenRouter-powered orchestrator + MCP Google Drive gateway."
+description = "Sovereign AI agent: Gemini/Ollama orchestrator + MCP Google Drive gateway (100% free stack)."
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
@@ -13,6 +13,7 @@ authors = [{ name = "AI Agent maintainers" }]
 dependencies = [
     "mcp>=1.2.0",
     "httpx>=0.27",
+    "google-genai>=1.0",
     "pydantic>=2.6",
     "pydantic-settings>=2.2",
     "python-dotenv>=1.0",
@@ -25,7 +26,6 @@ dependencies = [
     "fastapi>=0.110",
     "uvicorn[standard]>=0.27",
     "jinja2>=3.1",
-    "python-telegram-bot>=21.0",
 ]
 
 [project.optional-dependencies]
@@ -39,7 +39,6 @@ dev = [
 [project.scripts]
 ai-agent = "orchestrator.cli:app"
 ai-agent-web = "web.__main__:main"
-ai-agent-telegram = "telegram_bot:main"
 ai-agent-scheduler = "automation.__main__:main"
 mcp-drive-server = "mcp_drive_server.__main__:main"
 

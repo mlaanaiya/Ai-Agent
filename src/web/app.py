@@ -60,16 +60,14 @@ def create_app(settings: OrchestratorSettings | None = None) -> FastAPI:
         return templates.TemplateResponse(
             request,
             "index.html",
-            {"default_model": settings.openrouter_default_model},
+            {"default_model": settings.active_model_name},
         )
 
     @app.get("/api/config", response_model=ConfigStatus)
     async def get_config() -> ConfigStatus:
         sa_path = Path("./secrets/service_account.json")
-        has_or_key = bool(settings.openrouter_api_key and settings.openrouter_api_key != "test-key")
         has_drive = False
         audit_path = "./audit/mcp-drive.jsonl"
-        # Peek at the Drive server settings without requiring them to be valid.
         try:
             from mcp_drive_server.config import DriveServerSettings
 
@@ -80,15 +78,19 @@ def create_app(settings: OrchestratorSettings | None = None) -> FastAPI:
         except Exception:  # noqa: BLE001
             pass
         sa_present = Path(sa_path).exists()
+        if settings.llm_backend == "gemini":
+            llm_ok = bool(settings.gemini_api_key)
+        else:
+            llm_ok = await _check_ollama(settings.ollama_base_url)
         return ConfigStatus(
-            openrouter_configured=has_or_key,
+            llm_backend=settings.llm_backend,
+            llm_configured=llm_ok,
             drive_folder_configured=has_drive,
             service_account_present=sa_present,
             mcp_transport=settings.mcp_transport,
-            default_model=settings.openrouter_default_model,
-            max_cost_usd=settings.openrouter_max_cost_usd,
+            default_model=settings.active_model_name,
             audit_log_path=str(audit_path),
-            ready=has_or_key and (has_drive or settings.mcp_transport == "http"),
+            ready=llm_ok and (has_drive or settings.mcp_transport == "http"),
         )
 
     @app.get("/api/tools", response_model=list[ToolInfo])
@@ -232,7 +234,136 @@ def create_app(settings: OrchestratorSettings | None = None) -> FastAPI:
             "session_id": entry.id,
         }
 
+    # ---- Quick-log endpoints (phone shortcut → agent) -----------------------
+    # These are the fast-path endpoints for one-tap logging from a phone.
+    # Each maps to a concrete agent prompt that uses append_to_file.
+
+    def _check_token(request: Request) -> None:
+        expected = settings.quicklog_token
+        if not expected:
+            raise HTTPException(
+                status_code=503,
+                detail="QUICKLOG_TOKEN not configured on the server.",
+            )
+        got = request.headers.get("x-quicklog-token") or request.query_params.get("token")
+        if got != expected:
+            raise HTTPException(status_code=401, detail="invalid token")
+
+    async def _run_quicklog(prompt: str, title: str) -> dict[str, Any]:
+        entry = await store.create(title=f"quicklog:{title}")
+        async with entry.lock:
+            result = await entry.agent.run(prompt)
+        entry.total_cost_usd += result.total_cost_usd
+        return {
+            "status": result.stopped_reason,
+            "text": result.final_text,
+            "session_id": entry.id,
+        }
+
+    @app.post("/api/quicklog/med")
+    async def quicklog_med(payload: dict[str, Any], request: Request) -> dict[str, Any]:
+        """Log a medication dose as taken.
+        Body: {"slot": "morning"|"evening", "note": "...(opt)"}
+        """
+        _check_token(request)
+        slot = (payload.get("slot") or "").strip() or "unspecified"
+        note = (payload.get("note") or "").strip()
+        prompt = (
+            f"Find Health/Meds/meds-log.jsonl. Append a JSON line with the "
+            f"current ISO timestamp, slot='{slot}', status='taken', "
+            f"note={json.dumps(note)}. Reply 'logged'."
+        )
+        return await _run_quicklog(prompt, f"med-{slot}")
+
+    @app.post("/api/quicklog/vitals")
+    async def quicklog_vitals(
+        payload: dict[str, Any], request: Request
+    ) -> dict[str, Any]:
+        """Log a vitals reading (BP, weight, water, heart rate).
+        Body: {"type": "bp"|"weight"|"water"|"hr", "value": ..., "unit": "...(opt)"}
+        """
+        _check_token(request)
+        kind = (payload.get("type") or "").strip()
+        if kind not in {"bp", "weight", "water", "hr"}:
+            raise HTTPException(status_code=422, detail="invalid vitals type")
+        prompt = (
+            f"Find Health/Vitals/vitals-log.jsonl. Append a JSON line with "
+            f"the current ISO timestamp and these fields: "
+            f"{json.dumps(payload)}. Reply 'logged'."
+        )
+        return await _run_quicklog(prompt, f"vitals-{kind}")
+
+    @app.post("/api/quicklog/expense")
+    async def quicklog_expense(
+        payload: dict[str, Any], request: Request
+    ) -> dict[str, Any]:
+        """Log a one-off expense without waiting for a statement.
+        Body: {"amount": float, "currency": "EUR", "category": "...", "merchant": "...", "note": "..."}
+        """
+        _check_token(request)
+        if "amount" not in payload:
+            raise HTTPException(status_code=422, detail="amount is required")
+        prompt = (
+            f"Find Money/Expenses/expenses.csv. Append a CSV row with "
+            f"today's date and these fields "
+            f"(date,amount,currency,category,merchant,note,source): "
+            f"{json.dumps(payload)}. Use source='quicklog'. Reply 'logged'."
+        )
+        return await _run_quicklog(prompt, "expense")
+
+    @app.post("/api/quicklog/todo")
+    async def quicklog_todo(
+        payload: dict[str, Any], request: Request
+    ) -> dict[str, Any]:
+        """Add a todo entry.
+        Body: {"text": "...", "due": "...(opt ISO date)"}
+        """
+        _check_token(request)
+        text = (payload.get("text") or "").strip()
+        if not text:
+            raise HTTPException(status_code=422, detail="text is required")
+        prompt = (
+            f"Find Life/Todos/todos.jsonl. Append a JSON line with fields: "
+            f"created (ISO now), text={json.dumps(text)}, "
+            f"due={json.dumps(payload.get('due'))}, "
+            f"source='quicklog', status='pending'. Reply 'logged'."
+        )
+        return await _run_quicklog(prompt, "todo")
+
+    @app.post("/api/quicklog/reading")
+    async def quicklog_reading(
+        payload: dict[str, Any], request: Request
+    ) -> dict[str, Any]:
+        """Save an article / video to the reading list.
+        Body: {"url": "...", "title": "...(opt)", "tag": "...(opt)"}
+        """
+        _check_token(request)
+        url = (payload.get("url") or "").strip()
+        if not url:
+            raise HTTPException(status_code=422, detail="url is required")
+        prompt = (
+            f"Find Dev/Learning/reading-list.jsonl. Append a JSON line with "
+            f"fields: created (ISO now), url={json.dumps(url)}, "
+            f"title={json.dumps(payload.get('title'))}, "
+            f"tag={json.dumps(payload.get('tag'))}, status='to-read'. "
+            f"Reply 'logged'."
+        )
+        return await _run_quicklog(prompt, "reading")
+
     return app
+
+
+async def _check_ollama(base_url: str) -> bool:
+    """Quick health check: can we reach Ollama?"""
+    import httpx as _httpx
+
+    url = base_url.rstrip("/").replace("/v1", "")
+    try:
+        async with _httpx.AsyncClient(timeout=3.0) as client:
+            resp = await client.get(url)
+            return resp.status_code < 500
+    except Exception:  # noqa: BLE001
+        return False
 
 
 def _audit_path() -> Path:
