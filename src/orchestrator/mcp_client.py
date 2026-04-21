@@ -139,7 +139,7 @@ class MCPGateway:
             else:
                 try:
                     chunks.append(json.dumps(block.model_dump(), default=str))
-                except Exception:  # noqa: BLE001
+                except Exception:
                     chunks.append(str(block))
         payload = "\n".join(c for c in chunks if c)
 
@@ -156,3 +156,85 @@ class MCPGateway:
 
     async def __aexit__(self, *_: object) -> None:
         await self.aclose()
+
+
+class MultiMCPGateway:
+    """Aggregate several MCP connections behind the same tool-calling surface."""
+
+    def __init__(self, gateways: list[tuple[str, MCPGateway]]) -> None:
+        self._gateways = list(gateways)
+        self._tools: list[ToolBinding] = []
+        self._tool_index: dict[str, MCPGateway] = {}
+
+        for server_name, gateway in self._gateways:
+            for tool in gateway.tools:
+                if tool.name in self._tool_index:
+                    raise RuntimeError(
+                        f"Duplicate MCP tool name '{tool.name}' exposed by multiple servers. "
+                        "Rename or prefix one of the tools to keep dispatch unambiguous."
+                    )
+                self._tool_index[tool.name] = gateway
+                self._tools.append(tool)
+            logger.info(
+                "Attached MCP server %s with tools: %s",
+                server_name,
+                [tool.name for tool in gateway.tools],
+            )
+
+    @property
+    def tools(self) -> list[ToolBinding]:
+        return list(self._tools)
+
+    def openai_tools(self) -> list[dict[str, Any]]:
+        return [tool.to_openai_tool() for tool in self._tools]
+
+    async def call(self, name: str, arguments: dict[str, Any]) -> str:
+        gateway = self._tool_index.get(name)
+        if gateway is None:
+            raise KeyError(f"Unknown MCP tool: {name}")
+        return await gateway.call(name, arguments)
+
+    async def aclose(self) -> None:
+        for _, gateway in reversed(self._gateways):
+            await gateway.aclose()
+
+    async def __aenter__(self) -> MultiMCPGateway:
+        return self
+
+    async def __aexit__(self, *_: object) -> None:
+        await self.aclose()
+
+
+async def connect_from_definition(definition) -> MCPGateway:
+    """Connect to a single MCP server described in config."""
+    if definition.transport == "http":
+        return await MCPGateway.connect_http(definition.url, token=definition.token or None)
+    return await MCPGateway.connect_stdio(
+        command=definition.command,
+        args=definition.args,
+        env={**os.environ, **definition.env},
+    )
+
+
+async def build_gateway(settings):
+    """Build either a single gateway or a multi-gateway aggregator."""
+    configs = settings.load_mcp_servers()
+    if configs:
+        gateways: list[tuple[str, MCPGateway]] = []
+        try:
+            for definition in configs:
+                gateway = await connect_from_definition(definition)
+                gateways.append((definition.name, gateway))
+        except Exception:
+            for _, gateway in reversed(gateways):
+                await gateway.aclose()
+            raise
+        if len(gateways) == 1:
+            return gateways[0][1]
+        return MultiMCPGateway(gateways)
+
+    if settings.mcp_transport == "http":
+        return await MCPGateway.connect_http(
+            settings.mcp_server_url, token=settings.mcp_server_token or None
+        )
+    return await MCPGateway.connect_stdio()

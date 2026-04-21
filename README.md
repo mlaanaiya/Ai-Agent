@@ -15,6 +15,12 @@ independent pillars, with **zero paid API keys**.
 Default LLM: **Gemini 2.0 Flash** (free tier, 15 req/min, 1M tokens/day).
 Fallback: **Ollama** (100% local, zero network). Switch with `LLM_BACKEND=ollama`.
 
+Additional deployment options now included in the repo:
+
+- `LLM_BACKEND=openai` for an OpenAI-compatible remote model API
+- a second `enterprise-gateway` MCP server for approved internal tools
+- a Telegram webhook channel with whitelist by Telegram `user_id` / `chat_id`
+
 ## Why this split
 
 - **Zero cost on the model.** Gemini free tier has generous daily limits;
@@ -25,6 +31,9 @@ Fallback: **Ollama** (100% local, zero network). Switch with `LLM_BACKEND=ollama
 - **Extensibility by composition.** Add Slack, Notion, or a CRM by
   registering another MCP server with `openclaw mcp set` — no code change
   in the agent.
+- **Least-privilege enterprise actions.** The enterprise MCP server exposes
+  explicit, auditable tools only: approved policy reads and structured
+  request queuing.
 
 ## Quickstart — Gemini (recommended, fastest)
 
@@ -110,6 +119,27 @@ HOST=0.0.0.0 PORT=8080 ai-agent-web
 - Toast notification system.
 - Mobile responsive with slide-out sidebar.
 
+## Quickstart — Telegram + multi-MCP
+
+```bash
+cp .env.example .env
+# Edit .env:
+#   TELEGRAM_BOT_TOKEN=<bot token>
+#   TELEGRAM_WEBHOOK_SECRET=<shared secret>
+#   TELEGRAM_ALLOWED_USER_IDS=123456789
+#   MCP_SERVERS_CONFIG_FILE=./config/mcp_servers.example.json
+
+ai-agent-web
+# Expose POST /api/telegram/webhook over HTTPS, then register the webhook
+# in Telegram with the same secret token.
+```
+
+Register both MCP servers in OpenClaw with:
+
+```bash
+./scripts/register-openclaw.sh --with-enterprise
+```
+
 ## Quickstart — automation (scheduled prompts)
 
 ```bash
@@ -126,7 +156,9 @@ curl -X POST http://localhost:8000/api/webhook \
      -d '{"prompt": "List files in the sandbox."}'
 ```
 
-## MCP tools (9 total)
+## MCP tools
+
+### Drive gateway (9 tools)
 
 | Tool | Description |
 |---|---|
@@ -140,8 +172,18 @@ curl -X POST http://localhost:8000/api/webhook \
 | `rename_file` | Rename a file |
 | `delete_file` | Permanently delete a file (cannot delete the root) |
 
-All tools enforce the folder sandbox, MIME allow-list, byte cap, and audit
-logging. See `src/mcp_drive_server/server.py` for the full schema.
+### Enterprise gateway (4 tools)
+
+| Tool | Description |
+|---|---|
+| `enterprise_list_policies` | List approved internal policies/runbooks from a whitelisted directory |
+| `enterprise_read_policy` | Read one approved policy by slug |
+| `enterprise_create_request` | Queue a structured enterprise request for human follow-up |
+| `enterprise_list_requests` | List recently queued enterprise requests |
+
+Both gateways enforce explicit policy boundaries and append every tool call to
+an audit log. See `src/mcp_drive_server/server.py` and
+`src/mcp_enterprise_server/server.py`.
 
 ## Repository layout
 
@@ -152,20 +194,27 @@ src/
     drive.py                  # sandboxed Drive wrapper (policy lives here)
     audit.py                  # append-only JSONL audit
     config.py                 # pydantic settings
+  mcp_enterprise_server/      # least-privilege enterprise MCP gateway
+    server.py                 # policy docs + request queue tools
+    store.py                  # path hardening and request validation
+    config.py                 # pydantic settings
   orchestrator/               # fallback runner, only used without OpenClaw
-    agent.py, gemini.py, ollama.py, llm.py, mcp_client.py, memory.py, cli.py
+    agent.py, gemini.py, ollama.py, openai_compatible.py
+    llm.py, mcp_client.py, memory.py, cli.py
   web/                        # FastAPI web interface (dark theme, SSE streaming)
-    app.py, session_store.py, schemas.py, templates/, static/
+    app.py, session_store.py, telegram.py, schemas.py, templates/, static/
   automation/                 # Scheduled prompt runner + webhook trigger
     scheduler.py              # cron-like loop, job definitions, history
 config/
   SOUL.md                     # OpenClaw personality (document analyst)
   AGENTS.md                   # OpenClaw operating rules
   openclaw.config.json5       # OpenClaw config snippet
+  mcp_servers.example.json    # local multi-MCP fallback config
+  enterprise_policies/        # approved runbooks exposed by enterprise MCP
   jobs.example.json           # sample scheduled jobs
 scripts/
   register-openclaw.sh        # idempotent `openclaw mcp set` wrapper
-tests/                        # 43 hermetic tests (no net, no creds)
+tests/                        # 56 hermetic tests (no net, no creds)
 docs/ARCHITECTURE.md
 Dockerfile
 docker-compose.yml
@@ -173,14 +222,16 @@ docker-compose.yml
 
 ## Runtime flow
 
-1. A user interacts via the web UI, CLI, or automation scheduler.
+1. A user interacts via the web UI, CLI, automation scheduler, or Telegram bot.
 2. The orchestrator calls `build_llm()` to select the configured backend
-   (Gemini or Ollama) and discovers the `drive-gateway` MCP server's tools.
-3. On a tool call, the orchestrator forwards it to the MCP server.
-4. The MCP server validates policy (sandbox, MIME allow-list, byte cap),
-   calls Google Drive, logs the call to `audit/mcp-drive.jsonl`, and
-   returns the result.
-5. The orchestrator loops until the model produces a final answer, then
+   (Gemini, Ollama, or an OpenAI-compatible remote API).
+3. The orchestrator discovers one or more MCP servers and exposes their tools
+   as a single tool set to the model.
+4. On a tool call, the orchestrator dispatches it to the matching MCP server.
+5. The Drive MCP server enforces sandbox, MIME allow-list, and byte caps;
+   the enterprise MCP server restricts reads to approved policy files and
+   writes actions only to a structured request outbox.
+6. The orchestrator loops until the model produces a final answer, then
    displays it in the originating interface.
 
 ## Security model (summary)
@@ -188,15 +239,22 @@ docker-compose.yml
 - **Credential isolation.** The MCP server holds Google credentials.
   The LLM never sees Google creds. Gemini API key is used only for
   LLM inference — never exposed to the model itself.
+- **Telegram whitelist.** The webhook refuses any message whose Telegram
+  `user_id` / `chat_id` is outside the configured allow-list, and private
+  chats are enforced by default.
 - **Local option.** Set `LLM_BACKEND=ollama` for fully local inference
   where no prompts or responses leave the machine.
 - **Folder sandbox.** `DriveClient._assert_in_sandbox` walks each file's
   parent chain and refuses anything whose ancestors don't include
   `DRIVE_ROOT_FOLDER_ID`.
+- **Enterprise least privilege.** Internal runbooks are only readable from
+  `ENTERPRISE_POLICIES_DIR`; write operations only enqueue JSON requests in
+  `ENTERPRISE_REQUEST_OUTBOX`.
 - **MIME allow-list.** `DRIVE_ALLOWED_MIME_TYPES` caps readable types.
 - **Byte cap.** Reads over `DRIVE_MAX_READ_BYTES` abort mid-download.
 - **Audit trail.** Every MCP tool call is appended to
-  `audit/mcp-drive.jsonl` with ts, args, status, duration, and error.
+  `audit/mcp-drive.jsonl` or `audit/mcp-enterprise.jsonl` with ts, args,
+  status, duration, and error.
 
 See `docs/ARCHITECTURE.md` for the full threat model.
 
@@ -220,14 +278,25 @@ Pull with: `ollama pull <model>`
 
 Set `LLM_BACKEND=ollama` in `.env` to use Ollama instead of Gemini.
 
+### OpenAI-compatible remote API
+
+```bash
+LLM_BACKEND=openai
+OPENAI_API_KEY=...
+OPENAI_BASE_URL=https://api.openai.com/v1
+OPENAI_MODEL=gpt-4.1-mini
+```
+
+`OPENAI_BASE_URL` can also target a compatible gateway or proxy.
+
 ## Tests
 
 ```bash
 pytest -q
 ```
 
-All 43 tests are offline (mocked HTTP, in-memory MCP transport, fake Drive)
-— no API keys or network required.
+All 56 tests are offline (mocked HTTP, in-memory MCP transport, fake Drive /
+enterprise stores) — no API keys or network required.
 
 ## Prerequisites (everything is free)
 

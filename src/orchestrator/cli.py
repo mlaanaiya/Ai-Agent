@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Optional
 
 import typer
 from rich.console import Console
@@ -19,7 +18,7 @@ from rich.table import Table
 from .agent import Agent
 from .config import OrchestratorSettings
 from .llm import build_llm
-from .mcp_client import MCPGateway
+from .mcp_client import build_gateway
 
 app = typer.Typer(
     add_completion=False,
@@ -32,14 +31,6 @@ app = typer.Typer(
 console = Console()
 
 
-async def _build_gateway(settings: OrchestratorSettings) -> MCPGateway:
-    if settings.mcp_transport == "http":
-        return await MCPGateway.connect_http(
-            settings.mcp_server_url, token=settings.mcp_server_token or None
-        )
-    return await MCPGateway.connect_stdio()
-
-
 def _setup_logging(level: str) -> None:
     logging.basicConfig(
         level=level.upper(),
@@ -50,7 +41,7 @@ def _setup_logging(level: str) -> None:
 @app.command()
 def ask(
     prompt: str = typer.Argument(..., help="User request."),
-    model: Optional[str] = typer.Option(None, help="Override LLM model."),
+    model: str | None = typer.Option(None, help="Override LLM model."),
 ) -> None:
     """Run a single request and print the final answer."""
     settings = OrchestratorSettings()
@@ -61,7 +52,7 @@ def ask(
 
 async def _ask(settings: OrchestratorSettings, prompt: str, model: str | None) -> None:
     async with build_llm(settings) as llm:
-        async with await _build_gateway(settings) as mcp:
+        async with await build_gateway(settings) as mcp:
             agent = Agent(
                 llm=llm,
                 mcp=mcp,
@@ -78,7 +69,7 @@ async def _ask(settings: OrchestratorSettings, prompt: str, model: str | None) -
 
 
 @app.command()
-def chat(model: Optional[str] = typer.Option(None, help="Override LLM model.")) -> None:
+def chat(model: str | None = typer.Option(None, help="Override LLM model.")) -> None:
     """Interactive REPL (memory persists within the session)."""
     settings = OrchestratorSettings()
     settings.ensure_valid()
@@ -88,7 +79,7 @@ def chat(model: Optional[str] = typer.Option(None, help="Override LLM model.")) 
 
 async def _chat(settings: OrchestratorSettings, model: str | None) -> None:
     async with build_llm(settings) as llm:
-        async with await _build_gateway(settings) as mcp:
+        async with await build_gateway(settings) as mcp:
             agent = Agent(
                 llm=llm,
                 mcp=mcp,
@@ -125,7 +116,7 @@ def tools() -> None:
 
 
 async def _tools(settings: OrchestratorSettings) -> None:
-    async with await _build_gateway(settings) as mcp:
+    async with await build_gateway(settings) as mcp:
         table = Table(title="MCP tools")
         table.add_column("name", style="bold")
         table.add_column("description")

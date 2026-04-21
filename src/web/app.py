@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import json
 import logging
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from dataclasses import is_dataclass, asdict
+from dataclasses import asdict, is_dataclass
 from pathlib import Path
-from typing import Any, AsyncIterator
+from typing import Any
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import BackgroundTasks, FastAPI, Header, HTTPException, Request
 from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -18,6 +19,7 @@ from orchestrator.config import OrchestratorSettings
 
 from .schemas import AuditEntry, ChatRequest, ConfigStatus, SessionSummary, ToolInfo
 from .session_store import SessionStore
+from .telegram import process_telegram_update, validate_telegram_secret
 
 logger = logging.getLogger(__name__)
 
@@ -75,13 +77,22 @@ def create_app(settings: OrchestratorSettings | None = None) -> FastAPI:
             has_drive = bool(drive_settings.root_folder_id)
             sa_path = drive_settings.service_account_file
             audit_path = str(drive_settings.audit_log)
-        except Exception:  # noqa: BLE001
+        except Exception:
             pass
         sa_present = Path(sa_path).exists()
         if settings.llm_backend == "gemini":
             llm_ok = bool(settings.gemini_api_key)
+        elif settings.llm_backend == "openai":
+            llm_ok = bool(settings.openai_api_key)
         else:
             llm_ok = await _check_ollama(settings.ollama_base_url)
+        telegram_configured = bool(settings.telegram_bot_token)
+        telegram_whitelist_enabled = bool(
+            settings.telegram_allowed_user_ids or settings.telegram_allowed_chat_ids
+        )
+        mcp_ready = has_drive or settings.mcp_transport == "http" or bool(
+            settings.mcp_servers_config_file
+        )
         return ConfigStatus(
             llm_backend=settings.llm_backend,
             llm_configured=llm_ok,
@@ -90,7 +101,9 @@ def create_app(settings: OrchestratorSettings | None = None) -> FastAPI:
             mcp_transport=settings.mcp_transport,
             default_model=settings.active_model_name,
             audit_log_path=str(audit_path),
-            ready=llm_ok and (has_drive or settings.mcp_transport == "http"),
+            telegram_configured=telegram_configured,
+            telegram_whitelist_enabled=telegram_whitelist_enabled,
+            ready=llm_ok and mcp_ready,
         )
 
     @app.get("/api/tools", response_model=list[ToolInfo])
@@ -171,7 +184,7 @@ def create_app(settings: OrchestratorSettings | None = None) -> FastAPI:
                                 if first_user:
                                     entry.title = (first_user["text"] or entry.title)[:60]
                         yield _sse(event["type"], payload)
-                except Exception as exc:  # noqa: BLE001
+                except Exception as exc:
                     logger.exception("chat failed")
                     yield _sse("error", {"message": f"{type(exc).__name__}: {exc}"})
                 yield _sse("done", {"cost_usd": round(entry.total_cost_usd, 6)})
@@ -206,7 +219,7 @@ def create_app(settings: OrchestratorSettings | None = None) -> FastAPI:
                 continue
             try:
                 out.append(AuditEntry(**data))
-            except Exception:  # noqa: BLE001
+            except Exception:
                 continue
         return out
 
@@ -234,6 +247,24 @@ def create_app(settings: OrchestratorSettings | None = None) -> FastAPI:
             "session_id": entry.id,
         }
 
+    @app.post("/api/telegram/webhook")
+    async def telegram_webhook(
+        payload: dict[str, Any],
+        background_tasks: BackgroundTasks,
+        x_telegram_bot_api_secret_token: str | None = Header(default=None),
+    ) -> dict[str, bool]:
+        if not settings.telegram_bot_token:
+            raise HTTPException(status_code=503, detail="telegram bot is not configured")
+        if not validate_telegram_secret(settings, x_telegram_bot_api_secret_token):
+            raise HTTPException(status_code=403, detail="invalid telegram webhook secret")
+        background_tasks.add_task(
+            process_telegram_update,
+            store=store,
+            settings=settings,
+            update=payload,
+        )
+        return {"ok": True}
+
     return app
 
 
@@ -246,7 +277,7 @@ async def _check_ollama(base_url: str) -> bool:
         async with _httpx.AsyncClient(timeout=3.0) as client:
             resp = await client.get(url)
             return resp.status_code < 500
-    except Exception:  # noqa: BLE001
+    except Exception:
         return False
 
 
@@ -255,9 +286,9 @@ def _audit_path() -> Path:
         from mcp_drive_server.config import DriveServerSettings
 
         return Path(DriveServerSettings().audit_log)
-    except Exception:  # noqa: BLE001
+    except Exception:
         return Path("./audit/mcp-drive.jsonl")
 
 
 def _sse(event: str, data: Any) -> bytes:
-    return f"event: {event}\ndata: {json.dumps(data, default=_default_json)}\n\n".encode("utf-8")
+    return f"event: {event}\ndata: {json.dumps(data, default=_default_json)}\n\n".encode()

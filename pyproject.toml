@@ -41,6 +41,7 @@ ai-agent = "orchestrator.cli:app"
 ai-agent-web = "web.__main__:main"
 ai-agent-scheduler = "automation.__main__:main"
 mcp-drive-server = "mcp_drive_server.__main__:main"
+mcp-enterprise-server = "mcp_enterprise_server.__main__:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

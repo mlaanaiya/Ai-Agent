@@ -8,15 +8,14 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
+from datetime import UTC
 from typing import Any
-from unittest.mock import patch
 
 import pytest
 from fastapi.testclient import TestClient
 
 from orchestrator.agent import Agent, AgentStepTrace
 from orchestrator.config import OrchestratorSettings
-from orchestrator.memory import ConversationMemory
 from web.app import create_app
 
 
@@ -92,14 +91,14 @@ def client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
 
     async def fake_create(self, title: str | None = None):
         import uuid
-        from datetime import datetime, timezone
+        from datetime import datetime
         llm = FakeLLM()
         mcp = FakeMCP()
         agent = FakeAgent(llm=llm, mcp=mcp, system_prompt="sys", max_steps=4)  # type: ignore[arg-type]
         entry = ss_module.SessionEntry(
             id=uuid.uuid4().hex[:12],
             title=title or f"Session {len(self._sessions) + 1}",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
             llm=llm,  # type: ignore[arg-type]
             mcp=mcp,  # type: ignore[arg-type]
             agent=agent,
@@ -181,3 +180,47 @@ def test_audit_endpoint_handles_missing_file(
     res = client.get("/api/audit")
     assert res.status_code == 200
     assert res.json() == []
+
+
+def test_telegram_webhook_rejects_bad_secret(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "token")
+    monkeypatch.setenv("TELEGRAM_WEBHOOK_SECRET", "secret")
+
+    settings = OrchestratorSettings()
+    app = create_app(settings)
+    client = TestClient(app)
+
+    res = client.post(
+        "/api/telegram/webhook",
+        json={"update_id": 1},
+        headers={"X-Telegram-Bot-Api-Secret-Token": "wrong"},
+    )
+    assert res.status_code == 403
+
+
+def test_telegram_webhook_accepts_valid_secret(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "token")
+    monkeypatch.setenv("TELEGRAM_WEBHOOK_SECRET", "secret")
+
+    from web import app as app_module
+
+    called: list[dict[str, Any]] = []
+
+    async def fake_process(**kwargs: Any) -> dict[str, Any]:
+        called.append(kwargs)
+        return {"accepted": True}
+
+    monkeypatch.setattr(app_module, "process_telegram_update", fake_process)
+
+    settings = OrchestratorSettings()
+    app = create_app(settings)
+    client = TestClient(app)
+
+    res = client.post(
+        "/api/telegram/webhook",
+        json={"update_id": 1},
+        headers={"X-Telegram-Bot-Api-Secret-Token": "secret"},
+    )
+    assert res.status_code == 200
+    assert res.json() == {"ok": True}
+    assert called and called[0]["update"] == {"update_id": 1}

@@ -44,6 +44,18 @@
           MCP_AUDIT_LOG: "./audit/mcp-drive.jsonl",
         },
       },
+      "enterprise-gateway": {
+        command: "python",
+        args: ["-m", "mcp_enterprise_server"],
+        cwd: "${WORKSPACE}",
+        env: {
+          ENTERPRISE_POLICIES_DIR: "./config/enterprise_policies",
+          ENTERPRISE_REQUEST_OUTBOX: "./var/enterprise_requests",
+          ENTERPRISE_AUDIT_LOG: "./audit/mcp-enterprise.jsonl",
+          ENTERPRISE_MAX_POLICY_BYTES: "250000",
+          ENTERPRISE_ALLOWED_REQUEST_TYPES: "access,incident,change",
+        },
+      },
     },
   },
 }

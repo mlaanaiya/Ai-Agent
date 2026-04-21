@@ -45,4 +45,6 @@ class ConfigStatus(BaseModel):
     mcp_transport: str
     default_model: str
     audit_log_path: str
+    telegram_configured: bool
+    telegram_whitelist_enabled: bool
     ready: bool

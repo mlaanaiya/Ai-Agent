@@ -8,8 +8,9 @@ if TYPE_CHECKING:
     from .config import OrchestratorSettings
     from .gemini import GeminiClient
     from .ollama import OllamaClient
+    from .openai_compatible import OpenAICompatibleClient
 
-    LLMClient = GeminiClient | OllamaClient
+    LLMClient = GeminiClient | OllamaClient | OpenAICompatibleClient
 
 
 def build_llm(settings: OrchestratorSettings) -> LLMClient:
@@ -21,6 +22,16 @@ def build_llm(settings: OrchestratorSettings) -> LLMClient:
             api_key=settings.gemini_api_key,
             default_model=settings.gemini_model,
             timeout=settings.gemini_timeout,
+        )
+
+    if settings.llm_backend == "openai":
+        from .openai_compatible import OpenAICompatibleClient
+
+        return OpenAICompatibleClient(
+            api_key=settings.openai_api_key,
+            base_url=settings.openai_base_url,
+            default_model=settings.openai_model,
+            timeout=settings.openai_timeout,
         )
 
     from .ollama import OllamaClient

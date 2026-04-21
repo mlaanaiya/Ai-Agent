@@ -4,6 +4,7 @@
 # Usage:
 #   ./scripts/register-openclaw.sh            # local (stdio) variant
 #   ./scripts/register-openclaw.sh --remote   # Gandi-hosted (streamable-http)
+#   ./scripts/register-openclaw.sh --with-enterprise
 #
 # Prereqs:
 #   * openclaw CLI installed and onboarded (`openclaw onboard --auth-choice openrouter-api-key`)
@@ -23,8 +24,18 @@ command -v openclaw >/dev/null || {
 
 WORKSPACE="$(cd "$(dirname "$0")/.." && pwd)"
 SERVER_NAME="drive-gateway"
+WITH_ENTERPRISE=0
+REMOTE=0
 
-if [[ "${1:-}" == "--remote" ]]; then
+for arg in "$@"; do
+  if [[ "$arg" == "--with-enterprise" ]]; then
+    WITH_ENTERPRISE=1
+  elif [[ "$arg" == "--remote" ]]; then
+    REMOTE=1
+  fi
+done
+
+if [[ "${REMOTE}" == "1" ]]; then
     : "${MCP_SERVER_URL:?export MCP_SERVER_URL (e.g. https://mcp.example.gandi.net/mcp)}"
     : "${MCP_SERVER_TOKEN:?export MCP_SERVER_TOKEN (bearer token for the remote MCP)}"
     CONFIG_JSON=$(cat <<JSON
@@ -58,4 +69,27 @@ fi
 echo "Registering MCP server '${SERVER_NAME}' with OpenClaw..."
 openclaw mcp set "${SERVER_NAME}" "${CONFIG_JSON}"
 openclaw mcp show "${SERVER_NAME}"
+
+if [[ "${WITH_ENTERPRISE}" == "1" ]]; then
+  ENTERPRISE_NAME="enterprise-gateway"
+  ENTERPRISE_JSON=$(cat <<JSON
+{
+  "command": "python",
+  "args": ["-m", "mcp_enterprise_server"],
+  "cwd": "${WORKSPACE}",
+  "env": {
+    "ENTERPRISE_POLICIES_DIR": "${WORKSPACE}/config/enterprise_policies",
+    "ENTERPRISE_REQUEST_OUTBOX": "${WORKSPACE}/var/enterprise_requests",
+    "ENTERPRISE_AUDIT_LOG": "${WORKSPACE}/audit/mcp-enterprise.jsonl",
+    "ENTERPRISE_MAX_POLICY_BYTES": "250000",
+    "ENTERPRISE_ALLOWED_REQUEST_TYPES": "access,incident,change"
+  }
+}
+JSON
+)
+  echo "Registering MCP server '${ENTERPRISE_NAME}' with OpenClaw..."
+  openclaw mcp set "${ENTERPRISE_NAME}" "${ENTERPRISE_JSON}"
+  openclaw mcp show "${ENTERPRISE_NAME}"
+fi
+
 echo "Done. Verify with: openclaw mcp list"
