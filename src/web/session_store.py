@@ -11,13 +11,13 @@ from __future__ import annotations
 import asyncio
 import uuid
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from orchestrator.agent import Agent
 from orchestrator.config import OrchestratorSettings
-from orchestrator.mcp_client import MCPGateway
-from orchestrator.openrouter import OpenRouterClient
+from orchestrator.llm import build_llm
+from orchestrator.mcp_client import build_gateway
 
 
 @dataclass(slots=True)
@@ -25,9 +25,10 @@ class SessionEntry:
     id: str
     title: str
     created_at: datetime
-    llm: OpenRouterClient
-    mcp: MCPGateway
+    llm: Any
+    mcp: Any
     agent: Agent
+    external_key: str | None = None
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     transcript: list[dict[str, Any]] = field(default_factory=list)
     total_cost_usd: float = 0.0
@@ -46,6 +47,7 @@ class SessionStore:
     def __init__(self, settings: OrchestratorSettings) -> None:
         self._settings = settings
         self._sessions: dict[str, SessionEntry] = {}
+        self._external_keys: dict[str, str] = {}
         self._lock = asyncio.Lock()
 
     @property
@@ -55,15 +57,8 @@ class SessionStore:
     async def create(self, title: str | None = None) -> SessionEntry:
         async with self._lock:
             sid = uuid.uuid4().hex[:12]
-            llm = OpenRouterClient(
-                api_key=self._settings.openrouter_api_key,
-                base_url=self._settings.openrouter_base_url,
-                default_model=self._settings.openrouter_default_model,
-                app_url=self._settings.openrouter_app_url,
-                app_name=self._settings.openrouter_app_name,
-                max_cost_usd=self._settings.openrouter_max_cost_usd,
-            )
-            mcp = await self._connect_mcp()
+            llm = build_llm(self._settings)
+            mcp = await build_gateway(self._settings)
             agent = Agent(
                 llm=llm,
                 mcp=mcp,
@@ -73,7 +68,7 @@ class SessionStore:
             entry = SessionEntry(
                 id=sid,
                 title=title or f"Session {len(self._sessions) + 1}",
-                created_at=datetime.now(timezone.utc),
+                created_at=datetime.now(UTC),
                 llm=llm,
                 mcp=mcp,
                 agent=agent,
@@ -81,13 +76,40 @@ class SessionStore:
             self._sessions[sid] = entry
             return entry
 
-    async def _connect_mcp(self) -> MCPGateway:
-        if self._settings.mcp_transport == "http":
-            return await MCPGateway.connect_http(
-                self._settings.mcp_server_url,
-                token=self._settings.mcp_server_token or None,
+    async def get_or_create_by_key(
+        self,
+        external_key: str,
+        *,
+        title: str | None = None,
+    ) -> SessionEntry:
+        async with self._lock:
+            session_id = self._external_keys.get(external_key)
+            if session_id:
+                entry = self._sessions.get(session_id)
+                if entry is not None:
+                    return entry
+
+            sid = uuid.uuid4().hex[:12]
+            llm = build_llm(self._settings)
+            mcp = await build_gateway(self._settings)
+            agent = Agent(
+                llm=llm,
+                mcp=mcp,
+                system_prompt=self._settings.load_system_prompt(),
+                max_steps=self._settings.max_steps,
             )
-        return await MCPGateway.connect_stdio()
+            entry = SessionEntry(
+                id=sid,
+                title=title or f"Session {len(self._sessions) + 1}",
+                created_at=datetime.now(UTC),
+                llm=llm,
+                mcp=mcp,
+                agent=agent,
+                external_key=external_key,
+            )
+            self._sessions[sid] = entry
+            self._external_keys[external_key] = sid
+            return entry
 
     async def get(self, session_id: str) -> SessionEntry | None:
         return self._sessions.get(session_id)
@@ -104,6 +126,8 @@ class SessionStore:
     async def delete(self, session_id: str) -> bool:
         async with self._lock:
             entry = self._sessions.pop(session_id, None)
+            if entry and entry.external_key:
+                self._external_keys.pop(entry.external_key, None)
         if entry is None:
             return False
         await self._close(entry)
@@ -113,6 +137,7 @@ class SessionStore:
         async with self._lock:
             entries = list(self._sessions.values())
             self._sessions.clear()
+            self._external_keys.clear()
         for entry in entries:
             await self._close(entry)
 
@@ -120,9 +145,9 @@ class SessionStore:
     async def _close(entry: SessionEntry) -> None:
         try:
             await entry.mcp.aclose()
-        except Exception:  # noqa: BLE001
+        except Exception:
             pass
         try:
             await entry.llm.aclose()
-        except Exception:  # noqa: BLE001
+        except Exception:
             pass

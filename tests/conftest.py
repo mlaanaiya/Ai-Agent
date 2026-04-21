@@ -12,5 +12,5 @@ SRC = ROOT / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
-# Prevent pydantic-settings from reading a developer .env during tests.
-os.environ.setdefault("OPENROUTER_API_KEY", "test-key")
+# Default to ollama backend for tests (no API key needed).
+os.environ.setdefault("LLM_BACKEND", "ollama")

@@ -27,6 +27,7 @@
               soft:    "#a855f7",
               strong:  "#7e22ce",
               accent:  "#22d3ee",
+              glow:    "#e879f9",
             },
           },
           fontFamily: {
@@ -35,6 +36,8 @@
           },
           boxShadow: {
             glow: "0 0 32px -8px rgba(192, 132, 252, 0.35)",
+            'glow-lg': "0 0 60px -12px rgba(192, 132, 252, 0.4)",
+            'glow-accent': "0 0 32px -8px rgba(34, 211, 238, 0.3)",
           },
         }
       }
@@ -42,43 +45,78 @@
   </script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <!-- Markdown rendering -->
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <!-- Syntax highlighting -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
   <link rel="stylesheet" href="/static/styles.css" />
 </head>
 <body class="h-full bg-ink-950 text-ink-100 font-sans antialiased">
 
+<!-- Toast container -->
+<div id="toast-container" class="fixed top-4 right-4 z-50 flex flex-col gap-2"></div>
+
+<!-- Keyboard shortcuts modal -->
+<div id="shortcuts-modal" class="modal-overlay hidden">
+  <div class="modal-content">
+    <div class="flex items-center justify-between mb-4">
+      <h3 class="text-lg font-semibold">Keyboard Shortcuts</h3>
+      <button onclick="toggleShortcuts()" class="text-ink-400 hover:text-ink-100"><svg class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
+    </div>
+    <div class="space-y-2 text-sm">
+      <div class="shortcut-row"><kbd>Enter</kbd><span>Send message</span></div>
+      <div class="shortcut-row"><kbd>Shift + Enter</kbd><span>New line</span></div>
+      <div class="shortcut-row"><kbd>Ctrl + N</kbd><span>New session</span></div>
+      <div class="shortcut-row"><kbd>Ctrl + E</kbd><span>Export conversation</span></div>
+      <div class="shortcut-row"><kbd>Ctrl + /</kbd><span>Toggle shortcuts</span></div>
+      <div class="shortcut-row"><kbd>Escape</kbd><span>Close modal</span></div>
+    </div>
+  </div>
+</div>
+
 <div class="flex h-full min-h-screen">
 
   <!-- SIDEBAR -->
-  <aside class="hidden md:flex w-72 shrink-0 flex-col border-r border-ink-700 bg-ink-900/60 backdrop-blur">
+  <aside id="sidebar" class="sidebar-panel hidden md:flex w-72 shrink-0 flex-col border-r border-ink-700 bg-ink-900/60 backdrop-blur-xl">
     <div class="flex items-center gap-3 px-5 py-4 border-b border-ink-700">
-      <div class="h-9 w-9 rounded-lg bg-gradient-to-br from-brand to-brand-accent shadow-glow flex items-center justify-center">
+      <div class="logo-icon h-10 w-10 rounded-xl bg-gradient-to-br from-brand to-brand-accent shadow-glow flex items-center justify-center">
         <svg viewBox="0 0 24 24" class="h-5 w-5 text-ink-950" fill="currentColor">
           <path d="M12 2 3 7v10l9 5 9-5V7l-9-5Zm0 2.2 6.9 3.8-3.5 1.9L8.6 6.1 12 4.2Zm-7 5.1 6 3.3v7.1l-6-3.3V9.3Zm8 10.4v-7.1l6-3.3v7.1l-6 3.3Z"/>
         </svg>
       </div>
       <div>
-        <p class="text-sm font-semibold leading-tight">AI Agent</p>
-        <p class="text-xs text-ink-400">Drive assistant</p>
+        <p class="text-sm font-bold leading-tight bg-gradient-to-r from-brand to-brand-accent bg-clip-text text-transparent">AI Agent</p>
+        <p class="text-xs text-ink-400">Drive assistant &middot; Free stack</p>
       </div>
     </div>
 
     <!-- New session -->
     <div class="px-4 py-3">
-      <button id="new-session" class="w-full inline-flex items-center justify-center gap-2 rounded-lg bg-gradient-to-br from-brand-strong to-brand-soft hover:to-brand text-ink-100 text-sm font-medium py-2 transition shadow-glow">
+      <button id="new-session" class="w-full inline-flex items-center justify-center gap-2 rounded-xl bg-gradient-to-br from-brand-strong to-brand-soft hover:from-brand-soft hover:to-brand text-ink-100 text-sm font-medium py-2.5 transition-all duration-300 shadow-glow hover:shadow-glow-lg hover:scale-[1.02] active:scale-[0.98]">
         <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
         New session
       </button>
     </div>
 
+    <!-- Search sessions -->
+    <div class="px-4 pb-2">
+      <div class="relative">
+        <svg class="absolute left-2.5 top-2 h-3.5 w-3.5 text-ink-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+        <input id="session-search" type="text" placeholder="Search sessions…" class="w-full bg-ink-800 border border-ink-700 rounded-lg pl-8 pr-3 py-1.5 text-xs text-ink-200 placeholder-ink-500 focus:outline-none focus:border-brand-soft focus:ring-1 focus:ring-brand-soft/30 transition">
+      </div>
+    </div>
+
     <div class="px-4 pb-2 text-xs font-medium uppercase tracking-wider text-ink-400">Sessions</div>
     <ul id="session-list" class="flex-1 overflow-y-auto px-2 pb-2 space-y-1 text-sm"></ul>
 
+    <!-- Status card -->
     <div class="border-t border-ink-700 px-4 py-3 text-xs">
       <div id="status-card" class="space-y-1.5">
         <div class="flex items-center justify-between">
-          <span class="text-ink-400">OpenRouter</span>
-          <span class="status-dot" data-key="openrouter_configured"></span>
+          <span class="text-ink-400" id="status-llm-label">LLM</span>
+          <span class="status-dot" data-key="llm_configured"></span>
         </div>
         <div class="flex items-center justify-between">
           <span class="text-ink-400">Drive folder</span>
@@ -88,33 +126,53 @@
           <span class="text-ink-400">Service account</span>
           <span class="status-dot" data-key="service_account_present"></span>
         </div>
-        <div class="flex items-center justify-between pt-1 border-t border-ink-700 mt-1">
+        <div class="flex items-center justify-between pt-1.5 border-t border-ink-700 mt-1.5">
           <span class="text-ink-400">Model</span>
-          <span id="status-model" class="font-mono text-[11px] text-ink-200 truncate max-w-[140px]">—</span>
+          <span id="status-model" class="font-mono text-[11px] text-brand truncate max-w-[140px]">—</span>
         </div>
         <div class="flex items-center justify-between">
           <span class="text-ink-400">Transport</span>
           <span id="status-transport" class="font-mono text-[11px] text-ink-200">—</span>
         </div>
+        <div class="flex items-center justify-between">
+          <span class="text-ink-400">Inference</span>
+          <span id="status-inference" class="font-mono text-[11px] text-green-400">free</span>
+        </div>
       </div>
+    </div>
+
+    <!-- Bottom bar -->
+    <div class="border-t border-ink-700 px-4 py-2 flex items-center justify-between">
+      <button onclick="toggleShortcuts()" class="text-ink-400 hover:text-ink-100 text-[11px] flex items-center gap-1 transition">
+        <svg class="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M6 8h.01M10 8h.01M14 8h.01M18 8h.01M8 12h.01M12 12h.01M16 12h.01M8 16h8"/></svg>
+        Shortcuts
+      </button>
+      <span class="text-[10px] text-ink-500">v0.2 &middot; free-stack</span>
     </div>
   </aside>
 
   <!-- MAIN -->
   <main class="flex-1 flex flex-col min-w-0">
-    <header class="h-14 border-b border-ink-700 bg-ink-900/40 backdrop-blur flex items-center justify-between px-5">
-      <div class="min-w-0">
+    <header class="h-14 border-b border-ink-700 bg-ink-900/40 backdrop-blur-xl flex items-center justify-between px-5">
+      <!-- Mobile menu button -->
+      <button id="mobile-menu" class="md:hidden mr-3 text-ink-300 hover:text-ink-100">
+        <svg class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12h18M3 6h18M3 18h18"/></svg>
+      </button>
+      <div class="min-w-0 flex-1">
         <h1 id="header-title" class="text-sm font-semibold truncate">New conversation</h1>
         <p class="text-xs text-ink-400">
-          Model: <span id="header-model" class="font-mono text-ink-200">{{ default_model }}</span>
+          Model: <span id="header-model" class="font-mono text-brand">{{ default_model }}</span>
+          <span class="text-green-400 ml-1.5">&#9679; local</span>
         </p>
       </div>
-      <div class="flex items-center gap-4">
-        <div class="text-right text-xs">
-          <p class="text-ink-400">Session cost</p>
-          <p id="cost-display" class="font-mono text-ink-100 text-sm">$0.0000</p>
-        </div>
-        <button id="toggle-panel" class="hidden md:inline-flex items-center gap-1 rounded-md border border-ink-600 hover:border-ink-500 text-xs text-ink-200 px-2 py-1">
+      <div class="flex items-center gap-2">
+        <!-- Export button -->
+        <button id="export-btn" onclick="exportConversation()" class="inline-flex items-center gap-1 rounded-lg border border-ink-600 hover:border-brand-soft hover:bg-ink-800 text-xs text-ink-300 hover:text-ink-100 px-2.5 py-1.5 transition-all" title="Export conversation">
+          <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
+          Export
+        </button>
+        <!-- Toggle panel -->
+        <button id="toggle-panel" class="hidden md:inline-flex items-center gap-1 rounded-lg border border-ink-600 hover:border-brand-soft hover:bg-ink-800 text-xs text-ink-300 hover:text-ink-100 px-2.5 py-1.5 transition-all">
           <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
           Tools & audit
         </button>
@@ -126,66 +184,98 @@
 
       <!-- Chat stream -->
       <section class="flex-1 flex flex-col min-w-0">
-        <div id="chat" class="flex-1 overflow-y-auto px-6 py-6 space-y-4">
+        <div id="chat" class="flex-1 overflow-y-auto px-4 sm:px-6 py-6 space-y-4">
           <div id="empty-state" class="h-full flex items-center justify-center text-center">
-            <div class="max-w-md">
-              <div class="inline-flex items-center justify-center h-14 w-14 rounded-2xl bg-gradient-to-br from-brand-strong to-brand-accent shadow-glow mb-4">
-                <svg class="h-7 w-7 text-ink-950" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2 3 7v10l9 5 9-5V7l-9-5Z"/></svg>
+            <div class="max-w-lg animate-fade-in">
+              <div class="inline-flex items-center justify-center h-16 w-16 rounded-2xl bg-gradient-to-br from-brand-strong to-brand-accent shadow-glow-lg mb-5 logo-icon">
+                <svg class="h-8 w-8 text-ink-950" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2 3 7v10l9 5 9-5V7l-9-5Z"/></svg>
               </div>
-              <h2 class="text-xl font-semibold">Ask anything about your Drive sandbox.</h2>
-              <p class="text-ink-400 mt-2 text-sm">
-                The agent can list, search, read, and save files inside your sandboxed folder.
-                Every action is audited and enforced on the server side.
+              <h2 class="text-2xl font-bold bg-gradient-to-r from-brand via-brand-glow to-brand-accent bg-clip-text text-transparent">Ask anything about your Drive.</h2>
+              <p class="text-ink-400 mt-3 text-sm leading-relaxed">
+                The agent can list, search, read, create, move, rename and delete files
+                inside your sandboxed folder. Every action is audited. Inference is 100% local via Ollama.
               </p>
-              <div class="grid grid-cols-1 gap-2 mt-6 text-left">
-                <button class="suggestion text-sm rounded-lg border border-ink-700 hover:border-brand-soft hover:bg-ink-800 p-3 transition" data-prompt="List the files in the sandbox root.">
-                  <span class="text-brand">›</span> List the files in the sandbox root.
+
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-8 text-left">
+                <button class="suggestion group" data-prompt="List the files in the sandbox root.">
+                  <div class="flex items-center gap-2 mb-1">
+                    <svg class="h-4 w-4 text-brand group-hover:text-brand-accent transition" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+                    <span class="text-xs font-medium text-ink-200">Browse</span>
+                  </div>
+                  <span class="text-ink-300 text-xs">List files in the sandbox root</span>
                 </button>
-                <button class="suggestion text-sm rounded-lg border border-ink-700 hover:border-brand-soft hover:bg-ink-800 p-3 transition" data-prompt="Search for documents mentioning 'Q3' and summarise the first match.">
-                  <span class="text-brand">›</span> Search for 'Q3' and summarise the first match.
+                <button class="suggestion group" data-prompt="Search for documents mentioning 'Q3' and summarise the first match.">
+                  <div class="flex items-center gap-2 mb-1">
+                    <svg class="h-4 w-4 text-brand group-hover:text-brand-accent transition" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+                    <span class="text-xs font-medium text-ink-200">Search</span>
+                  </div>
+                  <span class="text-ink-300 text-xs">Find 'Q3' docs and summarise</span>
                 </button>
-                <button class="suggestion text-sm rounded-lg border border-ink-700 hover:border-brand-soft hover:bg-ink-800 p-3 transition" data-prompt="Save a file called hello.txt with the content 'hello from the agent' in the root.">
-                  <span class="text-brand">›</span> Save a file called hello.txt in the root.
+                <button class="suggestion group" data-prompt="Create a folder called 'Reports' in the root.">
+                  <div class="flex items-center gap-2 mb-1">
+                    <svg class="h-4 w-4 text-brand group-hover:text-brand-accent transition" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+                    <span class="text-xs font-medium text-ink-200">Create</span>
+                  </div>
+                  <span class="text-ink-300 text-xs">Create a Reports folder</span>
+                </button>
+                <button class="suggestion group" data-prompt="Save a file called hello.txt with the content 'Hello from the AI agent!' in the root.">
+                  <div class="flex items-center gap-2 mb-1">
+                    <svg class="h-4 w-4 text-brand group-hover:text-brand-accent transition" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+                    <span class="text-xs font-medium text-ink-200">Save</span>
+                  </div>
+                  <span class="text-ink-300 text-xs">Write a hello.txt file</span>
                 </button>
               </div>
+
+              <p class="text-[11px] text-ink-500 mt-6">
+                Powered by <span class="text-brand">Ollama</span> &middot; local inference &middot; zero API cost
+              </p>
             </div>
           </div>
         </div>
 
         <!-- Composer -->
-        <div class="border-t border-ink-700 bg-ink-900/60 backdrop-blur px-5 py-4">
+        <div class="border-t border-ink-700 bg-ink-900/60 backdrop-blur-xl px-4 sm:px-5 py-4">
           <form id="composer" class="flex items-end gap-3 max-w-4xl mx-auto">
-            <div class="flex-1 rounded-xl border border-ink-600 bg-ink-800 focus-within:border-brand-soft focus-within:ring-2 focus-within:ring-brand-soft/30 transition">
+            <div class="flex-1 rounded-xl border border-ink-600 bg-ink-800/80 focus-within:border-brand-soft focus-within:ring-2 focus-within:ring-brand-soft/30 focus-within:shadow-glow transition-all duration-300">
               <textarea id="prompt" rows="1" placeholder="Ask your Drive assistant…  (Shift+Enter for a new line)"
                 class="w-full bg-transparent resize-none outline-none px-4 py-3 text-sm placeholder-ink-400 max-h-60"></textarea>
             </div>
             <button id="send" type="submit"
-              class="inline-flex items-center justify-center h-11 w-11 rounded-xl bg-gradient-to-br from-brand-strong to-brand disabled:opacity-40 disabled:cursor-not-allowed hover:from-brand-soft hover:to-brand-accent transition shadow-glow">
+              class="send-btn inline-flex items-center justify-center h-11 w-11 rounded-xl bg-gradient-to-br from-brand-strong to-brand disabled:opacity-40 disabled:cursor-not-allowed hover:from-brand-soft hover:to-brand-accent transition-all duration-300 shadow-glow hover:shadow-glow-lg hover:scale-105 active:scale-95">
               <svg class="h-5 w-5 text-ink-950" viewBox="0 0 24 24" fill="currentColor"><path d="M3.4 20.4 22 12 3.4 3.6 3 10l13 2-13 2 .4 6.4Z"/></svg>
             </button>
           </form>
-          <p class="text-[11px] text-ink-400 mt-2 text-center">
-            Enter to send · Shift+Enter for a newline · Every MCP call is logged to <span class="font-mono">audit/mcp-drive.jsonl</span>
+          <p class="text-[11px] text-ink-500 mt-2 text-center">
+            Enter to send &middot; Shift+Enter for a newline &middot; Ctrl+/ for shortcuts &middot; Every MCP call is audited
           </p>
         </div>
       </section>
 
       <!-- Right panel: tools + audit -->
-      <aside id="right-panel" class="hidden lg:flex w-80 shrink-0 flex-col border-l border-ink-700 bg-ink-900/40">
-        <div class="border-b border-ink-700 px-4 py-3">
-          <h3 class="text-xs font-semibold uppercase tracking-wider text-ink-300">MCP tools</h3>
-          <p class="text-[11px] text-ink-400 mt-0.5">Discovered from the Drive gateway</p>
+      <aside id="right-panel" class="hidden lg:flex w-80 shrink-0 flex-col border-l border-ink-700 bg-ink-900/40 backdrop-blur-xl">
+        <!-- Tabs -->
+        <div class="flex border-b border-ink-700">
+          <button class="panel-tab active" data-tab="tools">MCP Tools</button>
+          <button class="panel-tab" data-tab="audit">Audit Log</button>
         </div>
-        <ul id="tools-list" class="px-3 py-2 space-y-2 max-h-64 overflow-y-auto text-sm"></ul>
 
-        <div class="border-y border-ink-700 px-4 py-3 flex items-center justify-between">
-          <div>
-            <h3 class="text-xs font-semibold uppercase tracking-wider text-ink-300">Audit log</h3>
-            <p class="text-[11px] text-ink-400 mt-0.5">Most recent MCP calls</p>
+        <!-- Tools tab -->
+        <div id="tab-tools" class="panel-tab-content flex-1 flex flex-col overflow-hidden">
+          <div class="px-4 py-3">
+            <p class="text-[11px] text-ink-400">Discovered from the Drive gateway</p>
           </div>
-          <button id="refresh-audit" class="text-xs text-brand hover:text-brand-accent">refresh</button>
+          <ul id="tools-list" class="flex-1 overflow-y-auto px-3 pb-2 space-y-2 text-sm"></ul>
         </div>
-        <ul id="audit-list" class="flex-1 overflow-y-auto px-3 py-2 space-y-2 text-xs"></ul>
+
+        <!-- Audit tab -->
+        <div id="tab-audit" class="panel-tab-content hidden flex-1 flex flex-col overflow-hidden">
+          <div class="px-4 py-3 flex items-center justify-between">
+            <p class="text-[11px] text-ink-400">Most recent MCP calls</p>
+            <button id="refresh-audit" class="text-xs text-brand hover:text-brand-accent transition">refresh</button>
+          </div>
+          <ul id="audit-list" class="flex-1 overflow-y-auto px-3 pb-2 space-y-2 text-xs"></ul>
+        </div>
       </aside>
     </div>
   </main>

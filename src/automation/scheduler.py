@@ -11,15 +11,15 @@ import asyncio
 import json
 import logging
 import time
-from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from orchestrator.agent import Agent, AgentResult
+from orchestrator.agent import Agent
 from orchestrator.config import OrchestratorSettings
-from orchestrator.mcp_client import MCPGateway
-from orchestrator.openrouter import OpenRouterClient
+from orchestrator.llm import build_llm
+from orchestrator.mcp_client import build_gateway
 
 logger = logging.getLogger(__name__)
 
@@ -115,24 +115,11 @@ class Scheduler:
 
     async def run_once(self, job: JobDefinition) -> JobRun:
         """Execute a single job and return the run record."""
-        started = datetime.now(timezone.utc).isoformat(timespec="seconds")
-        llm = OpenRouterClient(
-            api_key=self._settings.openrouter_api_key,
-            base_url=self._settings.openrouter_base_url,
-            default_model=self._settings.openrouter_default_model,
-            app_url=self._settings.openrouter_app_url,
-            app_name=self._settings.openrouter_app_name,
-            max_cost_usd=self._settings.openrouter_max_cost_usd,
-        )
-        mcp: MCPGateway | None = None
+        started = datetime.now(UTC).isoformat(timespec="seconds")
+        llm = build_llm(self._settings)
+        mcp = None
         try:
-            if self._settings.mcp_transport == "http":
-                mcp = await MCPGateway.connect_http(
-                    self._settings.mcp_server_url,
-                    token=self._settings.mcp_server_token or None,
-                )
-            else:
-                mcp = await MCPGateway.connect_stdio()
+            mcp = await build_gateway(self._settings)
 
             agent = Agent(
                 llm=llm,
@@ -142,11 +129,11 @@ class Scheduler:
                 max_steps=self._settings.max_steps,
             )
             result = await agent.run(job.prompt)
-            finished = datetime.now(timezone.utc).isoformat(timespec="seconds")
+            finished = datetime.now(UTC).isoformat(timespec="seconds")
 
             # Optionally save the result to Drive.
             if job.save_result and result.final_text:
-                ts = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+                ts = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
                 fname = f"{job.name}-{ts}.txt"
                 try:
                     await mcp.call(
@@ -158,7 +145,7 @@ class Scheduler:
                         },
                     )
                     logger.info("Job '%s' result saved as %s", job.name, fname)
-                except Exception as exc:  # noqa: BLE001
+                except Exception as exc:
                     logger.warning("Job '%s': failed to save result: %s", job.name, exc)
 
             run = JobRun(
@@ -170,8 +157,8 @@ class Scheduler:
                 cost_usd=result.total_cost_usd,
                 steps=len(result.steps),
             )
-        except Exception as exc:  # noqa: BLE001
-            finished = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        except Exception as exc:
+            finished = datetime.now(UTC).isoformat(timespec="seconds")
             run = JobRun(
                 job_name=job.name,
                 started_at=started,
@@ -217,7 +204,7 @@ class Scheduler:
                     last_run[job.name] = now
                     try:
                         await self.run_once(job)
-                    except Exception:  # noqa: BLE001
+                    except Exception:
                         logger.exception("Scheduler: job '%s' crashed", job.name)
             await asyncio.sleep(min(30, min(
                 (_parse_interval_seconds(j.cron) for j in self._jobs), default=60

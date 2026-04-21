@@ -11,4 +11,4 @@ server, so the Drive gateway can be exercised end-to-end without pulling in
 the full OpenClaw runtime.
 """
 
-__all__ = ["config", "openrouter", "mcp_client", "agent", "memory", "cli"]
+__all__ = ["config", "gemini", "ollama", "llm", "mcp_client", "agent", "memory", "cli"]

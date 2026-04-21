@@ -1,0 +1,30 @@
+{
+  "servers": [
+    {
+      "name": "drive-gateway",
+      "transport": "stdio",
+      "command": "python",
+      "args": ["-m", "mcp_drive_server"],
+      "env": {
+        "GOOGLE_SERVICE_ACCOUNT_FILE": "${GOOGLE_SERVICE_ACCOUNT_FILE}",
+        "DRIVE_ROOT_FOLDER_ID": "${DRIVE_ROOT_FOLDER_ID}",
+        "DRIVE_ALLOWED_MIME_TYPES": "${DRIVE_ALLOWED_MIME_TYPES}",
+        "DRIVE_MAX_READ_BYTES": "${DRIVE_MAX_READ_BYTES}",
+        "MCP_AUDIT_LOG": "${MCP_AUDIT_LOG}"
+      }
+    },
+    {
+      "name": "enterprise-gateway",
+      "transport": "stdio",
+      "command": "python",
+      "args": ["-m", "mcp_enterprise_server"],
+      "env": {
+        "ENTERPRISE_POLICIES_DIR": "${ENTERPRISE_POLICIES_DIR}",
+        "ENTERPRISE_REQUEST_OUTBOX": "${ENTERPRISE_REQUEST_OUTBOX}",
+        "ENTERPRISE_AUDIT_LOG": "${ENTERPRISE_AUDIT_LOG}",
+        "ENTERPRISE_MAX_POLICY_BYTES": "${ENTERPRISE_MAX_POLICY_BYTES}",
+        "ENTERPRISE_ALLOWED_REQUEST_TYPES": "${ENTERPRISE_ALLOWED_REQUEST_TYPES}"
+      }
+    }
+  ]
+}

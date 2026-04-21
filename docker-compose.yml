@@ -1,10 +1,22 @@
 # docker-compose for local development and Gandi Simple Hosting deployment.
 #
-# The MCP server runs as its own long-lived container. The orchestrator can be
-# started ad-hoc (`docker compose run --rm orchestrator ask "..."`) or run as a
-# daemon depending on your trigger (cron, webhook listener, etc.).
+# Ollama runs locally for free LLM inference — no API key needed.
+# The MCP server runs as its own long-lived container.
 
 services:
+  ollama:
+    image: ollama/ollama:latest
+    container_name: ai-agent-ollama
+    restart: unless-stopped
+    volumes:
+      - ollama-models:/root/.ollama
+    # GPU pass-through (uncomment if a GPU is available):
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - capabilities: [gpu]
+
   mcp-drive:
     build: .
     image: ai-agent:latest
@@ -14,22 +26,20 @@ services:
     volumes:
       - ./secrets:/app/secrets:ro
       - ./audit:/app/audit
-    # For the stdio transport this service is effectively a daemon that waits
-    # for an orchestrator subprocess; for production the server should be
-    # fronted with the `mcp` SDK's streamable HTTP transport — expose ports
-    # and switch the CMD accordingly.
     command: ["python", "-m", "mcp_drive_server"]
 
   orchestrator:
     build: .
     image: ai-agent:latest
     env_file: .env
+    environment:
+      OLLAMA_BASE_URL: "http://ollama:11434/v1"
     volumes:
       - ./secrets:/app/secrets:ro
       - ./audit:/app/audit
     depends_on:
       - mcp-drive
-    # Interactive CLI — run with `docker compose run --rm orchestrator chat`.
+      - ollama
     stdin_open: true
     tty: true
     entrypoint: ["python", "-m", "orchestrator"]
@@ -44,6 +54,7 @@ services:
     environment:
       HOST: "0.0.0.0"
       PORT: "8000"
+      OLLAMA_BASE_URL: "http://ollama:11434/v1"
     volumes:
       - ./secrets:/app/secrets:ro
       - ./audit:/app/audit
@@ -51,20 +62,8 @@ services:
       - "8000:8000"
     depends_on:
       - mcp-drive
+      - ollama
     entrypoint: ["python", "-m", "web"]
-
-  telegram:
-    build: .
-    image: ai-agent:latest
-    container_name: ai-agent-telegram
-    restart: unless-stopped
-    env_file: .env
-    volumes:
-      - ./secrets:/app/secrets:ro
-      - ./audit:/app/audit
-    depends_on:
-      - mcp-drive
-    entrypoint: ["python", "-m", "telegram_bot"]
 
   scheduler:
     build: .
@@ -72,10 +71,16 @@ services:
     container_name: ai-agent-scheduler
     restart: unless-stopped
     env_file: .env
+    environment:
+      OLLAMA_BASE_URL: "http://ollama:11434/v1"
     volumes:
       - ./secrets:/app/secrets:ro
       - ./audit:/app/audit
       - ./config:/app/config:ro
     depends_on:
       - mcp-drive
+      - ollama
     entrypoint: ["python", "-m", "automation"]
+
+volumes:
+  ollama-models:
